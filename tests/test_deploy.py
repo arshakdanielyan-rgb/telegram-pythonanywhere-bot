@@ -137,10 +137,16 @@ def test_deploy_rejects_concurrent_runs():
     to raise BlockingIOError on non-blocking acquire."""
     mock_request = MagicMock()
     mock_request.headers.get.return_value = "correct"
+    # Patch the whole fcntl object (not fcntl.flock) so the test is
+    # cross-platform: on Windows api.index.fcntl is None (no fcntl module),
+    # so there's no .flock attribute to patch. A mock whose flock raises
+    # BlockingIOError exercises the same "lock held → 409" path everywhere.
+    mock_fcntl = MagicMock()
+    mock_fcntl.flock.side_effect = BlockingIOError()
     with (
         patch("bot.config.DEPLOY_SECRET", "correct"),
         patch("api.index.request", mock_request),
-        patch("api.index.fcntl.flock", side_effect=BlockingIOError()),
+        patch("api.index.fcntl", mock_fcntl),
     ):
         from api.index import deploy
 

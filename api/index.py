@@ -1,8 +1,15 @@
-import fcntl
 import hmac
 import os
 import subprocess
 from flask import Flask, request
+
+try:
+    import fcntl  # Unix-only; used to serialize /api/deploy via flock.
+except ImportError:
+    # Windows (local dev / tests) has no fcntl. The deploy lock is a
+    # production (PythonAnywhere/Linux) concern, so degrade gracefully:
+    # /api/deploy still works, just without flock-based serialization.
+    fcntl = None
 
 app = Flask(__name__)
 
@@ -133,11 +140,12 @@ def deploy():
     lock_fd = os.open(_DEPLOY_LOCK_PATH, os.O_CREAT | os.O_RDWR, 0o644)
     locked = False
     try:
-        try:
-            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            locked = True
-        except BlockingIOError:
-            return "Another deploy is in progress, try again shortly", 409
+        if fcntl is not None:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                locked = True
+            except BlockingIOError:
+                return "Another deploy is in progress, try again shortly", 409
 
         try:
             result = subprocess.run(

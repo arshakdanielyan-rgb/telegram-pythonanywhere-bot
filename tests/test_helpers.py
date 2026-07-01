@@ -89,6 +89,68 @@ def test_send_reply_prefers_newline_split():
             assert sent_second == "second paragraph here"
 
 
+# ── stream_reply ───────────────────────────────────────────────────────────────
+
+
+def test_stream_reply_returns_full_text_and_finalizes():
+    with patch("bot.helpers.bot") as mock_bot:
+        from bot.helpers import stream_reply
+
+        msg = make_message()
+        result = stream_reply(msg, iter(["Hello ", "world", "!"]))
+        assert result == "Hello world!"
+        # A placeholder is sent first so something appears instantly.
+        mock_bot.send_message.assert_called_once()
+        # The final edit carries the complete text (Markdown pass).
+        final = mock_bot.edit_message_text.call_args_list[-1]
+        assert final[0][0] == "Hello world!"
+        assert final[1].get("parse_mode") == "Markdown"
+
+
+def test_stream_reply_final_edit_falls_back_to_plain():
+    """If the Markdown final edit fails (unbalanced entity), retry plain."""
+    with patch("bot.helpers.bot") as mock_bot:
+        # Suppress intermediate edits so only the final pass runs.
+        with patch("bot.helpers.STREAM_MIN_EDIT_CHARS", 10_000):
+            mock_bot.edit_message_text.side_effect = [
+                Exception("can't parse entities"),  # Markdown attempt
+                None,  # plain retry succeeds
+            ]
+            from bot.helpers import stream_reply
+
+            stream_reply(make_message(), iter(["an unbalanced * marker"]))
+            assert mock_bot.edit_message_text.call_count == 2
+            assert mock_bot.edit_message_text.call_args_list[0][1].get(
+                "parse_mode"
+            ) == "Markdown"
+            assert "parse_mode" not in mock_bot.edit_message_text.call_args_list[1][1]
+
+
+def test_stream_reply_splits_across_messages_on_overflow():
+    """When the reply grows past one Telegram message, a new message opens."""
+    with patch("bot.helpers.bot") as mock_bot:
+        with patch("bot.helpers.MAX_MSG_LEN", 10):
+            from bot.helpers import stream_reply
+
+            result = stream_reply(make_message(), iter(["A" * 8, "B" * 8]))
+            assert result == "A" * 8 + "B" * 8
+            # Placeholder for the first message + placeholder for the overflow
+            # continuation message.
+            assert mock_bot.send_message.call_count == 2
+
+
+def test_stream_reply_edit_error_is_non_fatal():
+    """A transient edit failure mid-stream must not abort the stream."""
+    with patch("bot.helpers.bot") as mock_bot:
+        with patch("bot.helpers.STREAM_MIN_EDIT_CHARS", 1):
+            mock_bot.edit_message_text.side_effect = Exception("429 Too Many Requests")
+            from bot.helpers import stream_reply
+
+            # Should complete and still return the full text despite edits failing.
+            result = stream_reply(make_message(), iter(["a", "b", "c"]))
+            assert result == "abc"
+
+
 # ── should_respond ─────────────────────────────────────────────────────────────
 
 

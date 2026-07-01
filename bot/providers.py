@@ -49,6 +49,47 @@ def _call_main(messages: list, retries: int = AI_RETRIES):
             time.sleep(wait)
 
 
+def _stream_main(messages: list, retries: int = AI_RETRIES):
+    """Yield content deltas from the OpenAI-compatible API as they arrive.
+
+    Mirrors _call_main's deadline/retry budget, but retries only apply to
+    *starting* the stream. Once any token has been yielded we can't safely
+    restart — the user has already seen partial text on screen, so a retry
+    would duplicate it. In that case we re-raise and let the caller decide.
+    """
+    deadline = time.monotonic() + AI_REQUEST_TIMEOUT * retries + retries
+    yielded = False
+    for attempt in range(retries):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("AI provider deadline exceeded")
+        timeout = min(AI_REQUEST_TIMEOUT, remaining)
+        try:
+            stream = ai.chat.completions.create(
+                model=MODEL,
+                messages=messages,
+                timeout=timeout,
+                stream=True,
+            )
+            for chunk in stream:
+                if not getattr(chunk, "choices", None):
+                    continue
+                delta = chunk.choices[0].delta.content
+                if delta:
+                    yielded = True
+                    yield delta
+            return
+        except Exception as e:
+            # Already showed partial output, or out of attempts — give up.
+            if yielded or attempt == retries - 1:
+                raise
+            wait = min(2**attempt, max(0, deadline - time.monotonic()))
+            print(
+                f"AI stream failed (attempt {attempt + 1}/{retries}): {e} — retrying in {wait}s"
+            )
+            time.sleep(wait)
+
+
 def _last_user_message(messages: list) -> str:
     """Return only the most recent user message.
 
@@ -106,3 +147,18 @@ def generate(user_id: int, messages: list) -> str:
     if provider == "hf":
         return _call_hf(messages)
     return _call_main(messages)
+
+
+def generate_stream(user_id: int, messages: list):
+    """Yield reply text deltas from the user's chosen AI provider.
+
+    `main` streams token-by-token via the OpenAI-compatible API. `hf`
+    (ArmGPT) has no streaming endpoint, so it yields its full reply as a
+    single delta — the caller still gets a working send, just without
+    incremental growth.
+    """
+    provider = get_provider(user_id)
+    if provider == "hf":
+        yield _call_hf(messages)
+        return
+    yield from _stream_main(messages)
