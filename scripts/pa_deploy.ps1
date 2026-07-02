@@ -154,10 +154,36 @@ function Test-PaPath {
 }
 
 # ---- 1. Verify API token works ----------------------------------------------
+# Retry a couple of times on Code 0 (network/TLS/proxy — no HTTP status) so a
+# transient blip doesn't abort the whole deploy. On a real HTTP error, surface
+# the actual status code so the cause is obvious (401 = bad/expired token or an
+# EU-server account, 403 = username mismatch) instead of a generic message.
 Write-Info "Verifying PA API token..."
-if ((Invoke-Pa -Path '/cpu/').Code -ne 200) {
-    Die "PA API rejected the token. Check PA_USERNAME and PA_API_TOKEN in .env."
+$cpu = $null
+for ($attempt = 1; $attempt -le 3; $attempt++) {
+    $cpu = Invoke-Pa -Path '/cpu/'
+    if ($cpu.Code -eq 200) { break }
+    if ($cpu.Code -eq 0 -and $attempt -lt 3) {
+        Write-Warn "no response from PA API (attempt $attempt/3): $($cpu.Body). Retrying in 3s..."
+        Start-Sleep -Seconds 3
+        continue
+    }
+    break
 }
+if ($cpu.Code -ne 200) {
+    switch ($cpu.Code) {
+        0       { Die "could not reach the PA API (network/TLS/proxy issue, no HTTP response). Last error: $($cpu.Body)" }
+        401     { Die ("PA API rejected the token (HTTP 401). Two common causes:`n" +
+                       "   1. The token is wrong or expired - regenerate it at`n" +
+                       "      https://www.pythonanywhere.com/account/#api_token and update PA_API_TOKEN in .env.`n" +
+                       "   2. Your account is on the EU server - this script targets the US server`n" +
+                       "      (www.pythonanywhere.com). EU accounts are not supported here.`n" +
+                       "   Also confirm PA_USERNAME='$PaUsername' is exactly your PA username.") }
+        403     { Die "PA API returned 403 for user '$PaUsername'. Confirm PA_USERNAME matches your account and the token belongs to it." }
+        default { Die "PA API check failed (HTTP $($cpu.Code)): $($cpu.Body)" }
+    }
+}
+Write-Ok "Token OK."
 
 # ---- 2. Create web app (idempotent) -----------------------------------------
 # Detect existence via the LIST endpoint, not GET /webapps/<domain>/: PA returns
