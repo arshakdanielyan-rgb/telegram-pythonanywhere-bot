@@ -1,5 +1,4 @@
 import os
-import random
 from datetime import datetime
 from telebot import types
 from bot.clients import bot, BOT_INFO
@@ -14,7 +13,6 @@ from bot.helpers import (
 )
 from bot.history import clear_history
 from bot.i18n import SUPPORTED_LANGUAGES, t
-from bot.notes import add_note, clear_notes, get_notes, remove_note
 from bot.preferences import get_language, get_provider, set_language, set_provider
 from bot.rate_limit import is_rate_limited
 
@@ -63,7 +61,7 @@ def _log(message, direction: str, text: str) -> None:
 def _stream_ai_command(message, prompt: str) -> None:
     """Stream a live AI reply for a fixed command prompt, with shared
     error handling. Used by the small "canned prompt" commands (/about,
-    /quote, /fact, /compliment): each just feeds a fixed instruction to
+    /quote, /fact, /quiz): each just feeds a fixed instruction to
     the AI and streams the result into the chat.
     """
     try:
@@ -96,12 +94,6 @@ def cmd_help(message):
         "help.quote",
         "help.fact",
         "help.quiz",
-        "help.compliment",
-        "help.roll",
-        "help.roast",
-        "help.remember",
-        "help.recall",
-        "help.forget",
         "help.language",
     ]
     if HF_SPACE_ID:
@@ -119,12 +111,6 @@ def cmd_help(message):
         reply = command_list
     send_reply(message, reply)
     _log(message, "out", reply)
-
-@bot.message_handler(commands=["roast"], func=is_allowed)
-def cmd_roast(message):
- name = message.text.split(maxsplit=1)[1] if " " in message.text else "you"
- reply = ask_ai(message.from_user.id, f"Write a short, playful, friendly roast of {name}.")
- bot.send_message(message.chat.id, reply)
 
 @bot.message_handler(commands=["reset"], func=is_allowed)
 def cmd_reset(message):
@@ -166,102 +152,6 @@ def cmd_quiz(message):
         "helps. Keep it to one or two sentences and invite them to reply "
         "with their guess.",
     )
-
-
-@bot.message_handler(commands=["compliment"], func=is_allowed)
-def cmd_compliment(message):
-    _stream_ai_command(
-        message,
-        "Give the user a short, genuine, wrestling-themed compliment to "
-        "brighten their day. One or two sentences.",
-    )
-
-
-# Dice roll is fully local — no AI needed. Optional argument sets the number
-# of sides: "/roll" is a d6, "/roll 20" is a d20. Out-of-range or non-numeric
-# arguments are rejected with a hint rather than silently coerced.
-ROLL_MIN_SIDES = 2
-ROLL_MAX_SIDES = 1000
-
-
-@bot.message_handler(commands=["roll"], func=is_allowed)
-def cmd_roll(message):
-    parts = (message.text or "").split(maxsplit=1)
-    sides = 6
-    if len(parts) > 1:
-        arg = parts[1].strip()
-        if not (arg.isdigit() and ROLL_MIN_SIDES <= int(arg) <= ROLL_MAX_SIDES):
-            bot.send_message(
-                message.chat.id,
-                _tr(
-                    message.from_user.id,
-                    "roll.invalid",
-                    min=ROLL_MIN_SIDES,
-                    max=ROLL_MAX_SIDES,
-                ),
-            )
-            return
-        sides = int(arg)
-    result = random.randint(1, sides)
-    reply = _tr(message.from_user.id, "roll.result", result=result, sides=sides)
-    bot.send_message(message.chat.id, reply)
-    _log(message, "out", reply)
-
-
-@bot.message_handler(commands=["remember"], func=is_allowed)
-def cmd_remember(message):
-    parts = (message.text or "").split(maxsplit=1)
-    note = parts[1].strip() if len(parts) > 1 else ""
-    if not note:
-        bot.send_message(message.chat.id, _tr(message.from_user.id, "remember.usage"))
-        return
-    add_note(message.from_user.id, note)
-    reply = _tr(message.from_user.id, "remember.saved")
-    bot.send_message(message.chat.id, reply)
-    _log(message, "out", reply)
-
-
-@bot.message_handler(commands=["recall"], func=is_allowed)
-def cmd_recall(message):
-    notes = get_notes(message.from_user.id)
-    if not notes:
-        bot.send_message(message.chat.id, _tr(message.from_user.id, "recall.none"))
-        return
-    lang = get_language(message.from_user.id)
-    numbered = "\n".join(f"{i}. {note}" for i, note in enumerate(notes, 1))
-    reply = f"{t('recall.header', lang)}\n\n{numbered}"
-    # send_reply splits long lists across messages and falls back to plain text
-    # if a note contains Markdown that Telegram would reject.
-    send_reply(message, reply)
-    _log(message, "out", reply)
-
-
-@bot.message_handler(commands=["forget"], func=is_allowed)
-def cmd_forget(message):
-    uid = message.from_user.id
-    parts = (message.text or "").split(maxsplit=1)
-    arg = parts[1].strip() if len(parts) > 1 else ""
-    if arg:
-        # "/forget <n>" — drop a single note by its /recall number.
-        if not arg.isdigit():
-            bot.send_message(message.chat.id, _tr(uid, "forget.invalid"))
-            return
-        removed = remove_note(uid, int(arg))
-        if removed is None:
-            bot.send_message(message.chat.id, _tr(uid, "forget.invalid"))
-            return
-        reply = _tr(uid, "forget.one", note=removed)
-        bot.send_message(message.chat.id, reply)
-        _log(message, "out", reply)
-        return
-    # "/forget" with no argument — clear everything.
-    if not get_notes(uid):
-        bot.send_message(message.chat.id, _tr(uid, "forget.nothing"))
-        return
-    clear_notes(uid)
-    reply = _tr(uid, "forget.all")
-    bot.send_message(message.chat.id, reply)
-    _log(message, "out", reply)
 
 
 # Prefix for the inline-button callbacks emitted by the /language menu.

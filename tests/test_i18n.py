@@ -42,16 +42,16 @@ def test_t_unknown_key_returns_the_key():
 def test_t_fills_placeholders():
     from bot.i18n import t
 
-    out = t("roll.result", "en", result=4, sides=20)
-    assert "4" in out and "20" in out
+    out = t("rate_limit.reached", "en", limit=42)
+    assert "42" in out
 
 
 def test_t_bad_placeholder_returns_unformatted_template():
     """A formatting error must never raise — return the raw template."""
     from bot.i18n import t
 
-    # roll.result expects result/sides; omitting them shouldn't crash.
-    assert t("roll.result", "en", wrong="x")
+    # rate_limit.reached expects {limit}; omitting it shouldn't crash.
+    assert t("rate_limit.reached", "en", wrong="x")
 
 
 def test_english_name_lookup_and_default():

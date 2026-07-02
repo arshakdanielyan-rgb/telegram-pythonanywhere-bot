@@ -158,7 +158,7 @@ def test_cmd_about_sends_generic_error_on_failure():
         assert "went wrong" in sent.lower()
 
 
-# ── /quote, /fact, /compliment (AI canned-prompt commands) ──────────────────────
+# ── /quote, /fact (AI canned-prompt commands) ──────────────────────
 
 
 def _assert_streams_prompt_keyword(handler_name, keyword):
@@ -188,10 +188,6 @@ def test_cmd_fact_streams_fact():
     _assert_streams_prompt_keyword("cmd_fact", "fact")
 
 
-def test_cmd_compliment_streams_compliment():
-    _assert_streams_prompt_keyword("cmd_compliment", "compliment")
-
-
 def test_cmd_quote_survives_ai_error():
     """A failure in the AI stream must send a generic error, not crash."""
     with (
@@ -203,197 +199,6 @@ def test_cmd_quote_survives_ai_error():
 
         cmd_quote(make_message())
         assert "went wrong" in mock_bot.send_message.call_args[0][1].lower()
-
-
-# ── /roll (local dice, no AI) ───────────────────────────────────────────────────
-
-
-def test_cmd_roll_default_is_d6():
-    with (
-        patch("bot.handlers.random.randint", return_value=4) as mock_rand,
-        patch("bot.handlers.bot") as mock_bot,
-    ):
-        from bot.handlers import cmd_roll
-
-        cmd_roll(make_message(text="/roll"))
-        mock_rand.assert_called_once_with(1, 6)
-        assert "4" in mock_bot.send_message.call_args[0][1]
-
-
-def test_cmd_roll_custom_sides():
-    with (
-        patch("bot.handlers.random.randint", return_value=17) as mock_rand,
-        patch("bot.handlers.bot") as mock_bot,
-    ):
-        from bot.handlers import cmd_roll
-
-        cmd_roll(make_message(text="/roll 20"))
-        mock_rand.assert_called_once_with(1, 20)
-        assert "17" in mock_bot.send_message.call_args[0][1]
-
-
-def test_cmd_roll_rejects_non_numeric_arg():
-    with (
-        patch("bot.handlers.random.randint") as mock_rand,
-        patch("bot.handlers.bot") as mock_bot,
-    ):
-        from bot.handlers import cmd_roll
-
-        cmd_roll(make_message(text="/roll abc"))
-        mock_rand.assert_not_called()
-        assert "number of sides" in mock_bot.send_message.call_args[0][1]
-
-
-def test_cmd_roll_rejects_out_of_range():
-    with (
-        patch("bot.handlers.random.randint") as mock_rand,
-        patch("bot.handlers.bot") as mock_bot,
-    ):
-        from bot.handlers import cmd_roll
-
-        cmd_roll(make_message(text="/roll 1"))  # below ROLL_MIN_SIDES
-        mock_rand.assert_not_called()
-
-
-# ── /remember and /recall ───────────────────────────────────────────────────────
-
-
-def test_cmd_remember_saves_note_and_confirms():
-    with (
-        patch("bot.handlers.add_note") as mock_add,
-        patch("bot.handlers.get_language", return_value="en"),
-        patch("bot.handlers.bot") as mock_bot,
-    ):
-        from bot.handlers import cmd_remember
-
-        cmd_remember(make_message(text="/remember I train on Mondays"))
-        mock_add.assert_called_once_with(123, "I train on Mondays")
-        assert "remember" in mock_bot.send_message.call_args[0][1].lower()
-
-
-def test_cmd_remember_without_text_shows_usage():
-    with (
-        patch("bot.handlers.add_note") as mock_add,
-        patch("bot.handlers.get_language", return_value="en"),
-        patch("bot.handlers.bot") as mock_bot,
-    ):
-        from bot.handlers import cmd_remember
-
-        cmd_remember(make_message(text="/remember"))
-        mock_add.assert_not_called()
-        assert "Usage" in mock_bot.send_message.call_args[0][1]
-
-
-def test_cmd_recall_with_no_notes():
-    with (
-        patch("bot.handlers.get_notes", return_value=[]),
-        patch("bot.handlers.get_language", return_value="en"),
-        patch("bot.handlers.bot") as mock_bot,
-    ):
-        from bot.handlers import cmd_recall
-
-        cmd_recall(make_message(text="/recall"))
-        assert "haven't" in mock_bot.send_message.call_args[0][1].lower()
-
-
-def test_cmd_recall_lists_numbered_notes():
-    with (
-        patch("bot.handlers.get_notes", return_value=["run", "lift"]),
-        patch("bot.handlers.get_language", return_value="en"),
-        patch("bot.handlers.send_reply") as mock_send,
-        patch("bot.handlers.bot"),
-    ):
-        from bot.handlers import cmd_recall
-
-        msg = make_message(text="/recall")
-        cmd_recall(msg)
-        sent = mock_send.call_args[0][1]
-        assert "1. run" in sent
-        assert "2. lift" in sent
-
-
-def test_cmd_recall_localizes_empty_message():
-    """The empty-notes message must honor the user's language."""
-    with (
-        patch("bot.handlers.get_notes", return_value=[]),
-        patch("bot.handlers.get_language", return_value="ru"),
-        patch("bot.handlers.bot") as mock_bot,
-    ):
-        from bot.handlers import cmd_recall
-
-        cmd_recall(make_message(text="/recall"))
-        assert mock_bot.send_message.call_args[0][1].startswith("🧠")
-        assert "запомнить" in mock_bot.send_message.call_args[0][1]
-
-
-# ── /forget ─────────────────────────────────────────────────────────────────────
-
-
-def test_cmd_forget_all_clears_notes():
-    with (
-        patch("bot.handlers.get_notes", return_value=["a", "b"]),
-        patch("bot.handlers.clear_notes") as mock_clear,
-        patch("bot.handlers.get_language", return_value="en"),
-        patch("bot.handlers.bot") as mock_bot,
-    ):
-        from bot.handlers import cmd_forget
-
-        cmd_forget(make_message(text="/forget"))
-        mock_clear.assert_called_once_with(123)
-        assert "Forgotten everything" in mock_bot.send_message.call_args[0][1]
-
-
-def test_cmd_forget_all_with_no_notes():
-    with (
-        patch("bot.handlers.get_notes", return_value=[]),
-        patch("bot.handlers.clear_notes") as mock_clear,
-        patch("bot.handlers.get_language", return_value="en"),
-        patch("bot.handlers.bot") as mock_bot,
-    ):
-        from bot.handlers import cmd_forget
-
-        cmd_forget(make_message(text="/forget"))
-        mock_clear.assert_not_called()
-        assert "nothing to forget" in mock_bot.send_message.call_args[0][1].lower()
-
-
-def test_cmd_forget_by_index_removes_one():
-    with (
-        patch("bot.handlers.remove_note", return_value="lift") as mock_remove,
-        patch("bot.handlers.get_language", return_value="en"),
-        patch("bot.handlers.bot") as mock_bot,
-    ):
-        from bot.handlers import cmd_forget
-
-        cmd_forget(make_message(text="/forget 2"))
-        mock_remove.assert_called_once_with(123, 2)
-        assert "lift" in mock_bot.send_message.call_args[0][1]
-
-
-def test_cmd_forget_invalid_index():
-    with (
-        patch("bot.handlers.remove_note", return_value=None) as mock_remove,
-        patch("bot.handlers.get_language", return_value="en"),
-        patch("bot.handlers.bot") as mock_bot,
-    ):
-        from bot.handlers import cmd_forget
-
-        cmd_forget(make_message(text="/forget 9"))
-        mock_remove.assert_called_once_with(123, 9)
-        assert "number of a note" in mock_bot.send_message.call_args[0][1]
-
-
-def test_cmd_forget_non_numeric_arg():
-    with (
-        patch("bot.handlers.remove_note") as mock_remove,
-        patch("bot.handlers.get_language", return_value="en"),
-        patch("bot.handlers.bot") as mock_bot,
-    ):
-        from bot.handlers import cmd_forget
-
-        cmd_forget(make_message(text="/forget everything"))
-        mock_remove.assert_not_called()
-        assert "number of a note" in mock_bot.send_message.call_args[0][1]
 
 
 # ── /language command + inline-button callback ──────────────────────────────────
