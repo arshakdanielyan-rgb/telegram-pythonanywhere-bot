@@ -102,11 +102,18 @@ $CloneUrl = $RepoUrl.Trim()
 if ($CloneUrl -like 'git@github.com:*')        { $CloneUrl = 'https://github.com/' + $CloneUrl.Substring('git@github.com:'.Length) }
 elseif ($CloneUrl -like 'ssh://git@github.com/*') { $CloneUrl = 'https://github.com/' + $CloneUrl.Substring('ssh://git@github.com/'.Length) }
 
+# PA lowercases the username to form the domain, and derives the WSGI filename
+# from that domain. So the domain and /var/www WSGI path MUST use the lowercase
+# username even when PA_USERNAME is mixed-case — otherwise we upload the shim to
+# /var/www/<MixedCase>_..._wsgi.py, which PA ignores while it keeps serving the
+# default Hello-World page from the lowercase file it actually loads. The home
+# directory keeps the registered username case (that's where PA clones/runs).
+$PaUserLower         = $PaUsername.ToLower()
 $PaApi               = "https://www.pythonanywhere.com/api/v0/user/$PaUsername"
-$Domain              = "$PaUsername.pythonanywhere.com"
+$Domain              = "$PaUserLower.pythonanywhere.com"
 $ProjectDir          = "/home/$PaUsername/$RepoName"
 $VenvDir             = "/home/$PaUsername/.virtualenvs/telegram-bot"
-$WsgiFile            = "/var/www/${PaUsername}_pythonanywhere_com_wsgi.py"
+$WsgiFile            = "/var/www/${PaUserLower}_pythonanywhere_com_wsgi.py"
 $WebhookUrlResolved  = "https://$Domain/api/webhook"
 $PythonVersion       = 'python313'
 
@@ -132,15 +139,35 @@ function Invoke-Pa {
     $uri = if ($Path -match '^https?://') { $Path } else { "$PaApi$Path" }
     $headers = @{}
     if (-not $NoAuth) { $headers['Authorization'] = "Token $PaToken" }
+    # NOTE: -StatusCodeVariable is an Invoke-RestMethod parameter and does NOT
+    # exist on Invoke-WebRequest — passing it throws "A parameter cannot be
+    # found" on every PowerShell version. Read the status off the response
+    # object instead ($resp.StatusCode); -SkipHttpErrorCheck (PS7+) keeps 4xx/5xx
+    # from throwing so we can branch on the code.
     $p = @{
         Uri = $uri; Method = $Method; Headers = $headers; TimeoutSec = $TimeoutSec
-        SkipHttpErrorCheck = $true; StatusCodeVariable = 'code'
+        SkipHttpErrorCheck = $true
     }
-    if ($Form)              { $p.Form = $Body }
-    elseif ($null -ne $Body) { $p.Body = $Body }
+    if ($Form) {
+        $p.Form = $Body
+    } elseif ($null -ne $Body) {
+        # Encode a hashtable body ourselves and set the media type explicitly.
+        # Invoke-WebRequest only auto-sets Content-Type: x-www-form-urlencoded
+        # for a dictionary body on POST — on PATCH/PUT it sends the body with no
+        # media type, which PA rejects as HTTP 415 ("Unsupported media type").
+        if ($Body -is [System.Collections.IDictionary]) {
+            $pairs = foreach ($k in $Body.Keys) {
+                '{0}={1}' -f [Uri]::EscapeDataString([string]$k), [Uri]::EscapeDataString([string]$Body[$k])
+            }
+            $p.Body = ($pairs -join '&')
+            $p.ContentType = 'application/x-www-form-urlencoded'
+        } else {
+            $p.Body = $Body
+        }
+    }
     try {
         $resp = Invoke-WebRequest @p
-        return [pscustomobject]@{ Code = [int]$code; Body = [string]$resp.Content }
+        return [pscustomobject]@{ Code = [int]$resp.StatusCode; Body = [string]$resp.Content }
     } catch {
         # Network-level failure (DNS, TLS, timeout) — no HTTP status.
         return [pscustomobject]@{ Code = 0; Body = [string]$_.Exception.Message }
