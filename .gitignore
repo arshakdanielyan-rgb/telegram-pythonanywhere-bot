@@ -8,3 +8,6 @@ __pycache__/
 .webhook_secret
 .vercel/
 bot.db
+# SQLite WAL-mode sidecar files created alongside bot.db at runtime.
+bot.db-shm
+bot.db-wal
