@@ -23,6 +23,7 @@
   "help.joke": "/joke — պատմել ըմբշամարտի կատակ",
   "help.quote": "/quote — ոգեշնչող ըմբշամարտի մեջբերում",
   "help.fact": "/fact — ըմբշամարտի հետաքրքիր փաստ",
+  "help.quiz": "/quiz — ըմբշամարտի վիկտորինայի հարց",
   "help.compliment": "/compliment — ընկերական հաճոյախոսություն",
   "help.roll": "/roll — գցել զառ (օրինակ՝ /roll 20)",
   "help.roast": "/roast — կարճ, կատակային roast",

@@ -23,6 +23,7 @@
   "help.joke": "/joke — tell a wrestling joke",
   "help.quote": "/quote — a motivational wrestling quote",
   "help.fact": "/fact — a surprising wrestling fact",
+  "help.quiz": "/quiz — a wrestling trivia question",
   "help.compliment": "/compliment — a friendly wrestling-themed compliment",
   "help.roll": "/roll — roll a dice (e.g. /roll 20)",
   "help.roast": "/roast — a short, playful roast",

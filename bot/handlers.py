@@ -95,6 +95,7 @@ def cmd_help(message):
         "help.joke",
         "help.quote",
         "help.fact",
+        "help.quiz",
         "help.compliment",
         "help.roll",
         "help.roast",
@@ -153,6 +154,17 @@ def cmd_fact(message):
     _stream_ai_command(
         message,
         "Share one short, surprising wrestling fact. Keep it to a sentence or two.",
+    )
+
+
+@bot.message_handler(commands=["quiz"], func=is_allowed)
+def cmd_quiz(message):
+    _stream_ai_command(
+        message,
+        "Ask the user one fun trivia question about wrestling. Give the "
+        "question only — no answer, no multiple-choice options unless it "
+        "helps. Keep it to one or two sentences and invite them to reply "
+        "with their guess.",
     )
 
 
