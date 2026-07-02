@@ -1,6 +1,7 @@
 import hmac
 import os
 import subprocess
+
 from flask import Flask, request
 
 try:
@@ -97,6 +98,27 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _DEPLOY_LOCK_PATH = os.path.join(_PROJECT_ROOT, ".deploy.lock")
 
 
+def _lock_deploy_nb(fd: int) -> None:
+    """Take an exclusive, non-blocking advisory lock on `fd`.
+
+    Raises BlockingIOError if another deploy already holds it. No-op on
+    platforms without fcntl (Windows): /api/deploy only runs on
+    PythonAnywhere/Linux, where overlapping GitHub Actions deploys are
+    the race this guards against. Keeping fcntl optional lets the test
+    suite (and a local dev install) import api.index on Windows.
+    """
+    if fcntl is None:
+        return
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def _unlock_deploy(fd: int) -> None:
+    """Release the lock taken by _lock_deploy_nb. No-op without fcntl."""
+    if fcntl is None:
+        return
+    fcntl.flock(fd, fcntl.LOCK_UN)
+
+
 def _pa_wsgi_path() -> str:
     """Return the PythonAnywhere WSGI file path for the current user, or
     empty string if not running on PA. Touching this file triggers a
@@ -140,12 +162,11 @@ def deploy():
     lock_fd = os.open(_DEPLOY_LOCK_PATH, os.O_CREAT | os.O_RDWR, 0o644)
     locked = False
     try:
-        if fcntl is not None:
-            try:
-                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                locked = True
-            except BlockingIOError:
-                return "Another deploy is in progress, try again shortly", 409
+        try:
+            _lock_deploy_nb(lock_fd)
+            locked = True
+        except BlockingIOError:
+            return "Another deploy is in progress, try again shortly", 409
 
         try:
             result = subprocess.run(
@@ -193,7 +214,7 @@ def deploy():
         # LOCK_UN so they can't mask the response from the try-block.
         if locked:
             try:
-                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                _unlock_deploy(lock_fd)
             except Exception:
                 pass
         os.close(lock_fd)
