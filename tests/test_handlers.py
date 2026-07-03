@@ -201,6 +201,55 @@ def test_cmd_quote_survives_ai_error():
         assert "went wrong" in mock_bot.send_message.call_args[0][1].lower()
 
 
+# ── /predictor ──────────────────────────────────────────────────────
+
+
+def test_cmd_predictor_streams_prediction():
+    """/predictor <names> streams an AI prediction whose prompt carries the
+    matchup, on behalf of the requesting user."""
+    sentinel = object()
+    with (
+        patch("bot.handlers.ask_ai_stream", return_value=sentinel) as mock_ask,
+        patch("bot.handlers.stream_reply", return_value="reply") as mock_send,
+        patch("bot.handlers.bot"),
+    ):
+        from bot.handlers import cmd_predictor
+
+        msg = make_message(text="/predictor John Cena vs Brock Lesnar")
+        cmd_predictor(msg)
+        assert mock_ask.call_args[0][0] == 123
+        assert "John Cena vs Brock Lesnar" in mock_ask.call_args[0][1]
+        mock_send.assert_called_once_with(msg, sentinel)
+
+
+def test_cmd_predictor_usage_hint_when_no_names():
+    """A bare /predictor shows the usage hint and never calls the AI."""
+    with (
+        patch("bot.handlers.ask_ai_stream") as mock_ask,
+        patch("bot.handlers.stream_reply") as mock_send,
+        patch("bot.handlers.bot") as mock_bot,
+    ):
+        from bot.handlers import cmd_predictor
+
+        cmd_predictor(make_message(text="/predictor"))
+        mock_ask.assert_not_called()
+        mock_send.assert_not_called()
+        assert "two wrestlers" in mock_bot.send_message.call_args[0][1].lower()
+
+
+def test_cmd_predictor_survives_ai_error():
+    """A failure in the AI stream must send a generic error, not crash."""
+    with (
+        patch("bot.handlers.ask_ai_stream"),
+        patch("bot.handlers.stream_reply", side_effect=Exception("boom")),
+        patch("bot.handlers.bot") as mock_bot,
+    ):
+        from bot.handlers import cmd_predictor
+
+        cmd_predictor(make_message(text="/predictor Alice vs Bob"))
+        assert "went wrong" in mock_bot.send_message.call_args[0][1].lower()
+
+
 # ── /language command + inline-button callback ──────────────────────────────────
 
 

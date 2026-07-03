@@ -89,6 +89,7 @@ def cmd_help(message):
         "help.quote",
         "help.fact",
         "help.quiz",
+        "help.predictor",
         "help.language",
     ]
     if HF_SPACE_ID:
@@ -153,6 +154,25 @@ def cmd_quiz(message):
         "helps. Keep it to one or two sentences and invite them to reply "
         "with their guess.",
     )
+
+
+@bot.message_handler(commands=["predictor"], func=is_allowed)
+def cmd_predictor(message):
+    parts = (message.text or "").split(maxsplit=1)
+    matchup = parts[1].strip() if len(parts) > 1 else ""
+    if not matchup:
+        bot.send_message(
+            message.chat.id, _tr(message.from_user.id, "predictor.usage")
+        )
+        return
+    prompt = (
+        "The user wants a fun, hypothetical wrestling match prediction for "
+        f"this matchup: {matchup}. Predict who is more likely to win and "
+        "clearly explain why — compare their styles, strengths, signature "
+        "techniques, and records if you know them. Make clear this is just a "
+        "fun prediction, not a real result, and never invent statistics."
+    )
+    _stream_ai_command(message, prompt)
 
 
 # Prefix for the inline-button callbacks emitted by the /language menu.

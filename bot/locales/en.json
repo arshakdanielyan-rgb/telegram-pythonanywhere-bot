@@ -14,11 +14,13 @@
   "help.quote": "💪 /quote — a motivational wrestling quote",
   "help.fact": "💡 /fact — a surprising wrestling fact",
   "help.quiz": "🧠 /quiz — a wrestling trivia question",
+  "help.predictor": "🥊 /predictor — predict a wrestling match winner",
   "help.language": "🌐 /language — change the bot's language",
   "help.model": "🔀 /model — switch AI provider",
   "model.current": "Current provider: {provider}\n\nOptions:\n/model main — Cerebras (fast, multilingual, with memory)\n/model hf — ArmGPT (Armenian only, slow, no memory)",
   "model.invalid": "Invalid choice. Use: /model main or /model hf",
   "model.save_failed": "Could not save preference. Try again later.",
   "model.switched_hf": "Switched to hf (ArmGPT).\n\nNote: this is a tiny base completion model trained only on Armenian text. It will continue whatever you write rather than answer questions, and it does not understand English. Replies take ~30-60s and there is no memory.",
-  "model.switched_main": "Switched to the main provider."
+  "model.switched_main": "Switched to the main provider.",
+  "predictor.usage": "🥊 Send me two wrestlers to compare, like:\n/predictor John Cena vs Brock Lesnar"
 }
