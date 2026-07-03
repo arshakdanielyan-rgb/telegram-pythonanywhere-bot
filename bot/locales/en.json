@@ -10,6 +10,7 @@
   "help.help": "❓ /help — show this message",
   "help.reset": "🧹 /reset — clear conversation history",
   "help.about": "ℹ️ /about — about this bot",
+  "help.sha": "🔖 /sha — show the live git commit SHA",
   "help.quote": "💪 /quote — a motivational wrestling quote",
   "help.fact": "💡 /fact — a surprising wrestling fact",
   "help.quiz": "🧠 /quiz — a wrestling trivia question",

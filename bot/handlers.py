@@ -2,7 +2,7 @@ import os
 from datetime import datetime
 from telebot import types
 from bot.clients import bot, BOT_INFO
-from bot.config import HF_SPACE_ID, RATE_LIMIT
+from bot.config import COMMIT_SHA, HF_SPACE_ID, RATE_LIMIT
 from bot.ai import ask_ai, ask_ai_stream
 from bot.helpers import (
     is_allowed,
@@ -85,6 +85,7 @@ def cmd_help(message):
         "help.help",
         "help.reset",
         "help.about",
+        "help.sha",
         "help.quote",
         "help.fact",
         "help.quiz",
@@ -118,6 +119,12 @@ def cmd_about(message):
         message,
         "Briefly introduce yourself: say who you are and what you can help with.",
     )
+
+
+@bot.message_handler(commands=["sha"], func=is_allowed)
+def cmd_sha(message):
+    sha = COMMIT_SHA or "unknown"
+    bot.send_message(message.chat.id, f"Live SHA: {sha}")
 
 
 @bot.message_handler(commands=["quote"], func=is_allowed)
