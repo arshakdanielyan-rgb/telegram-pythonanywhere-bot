@@ -99,6 +99,18 @@ SQLITE_PATH = os.environ.get("SQLITE_PATH", "").strip()
 # that is the documented deployment target. Override to suit your host.
 HOSTING_LABEL = os.environ.get("HOSTING_LABEL", "PythonAnywhere").strip()
 
+# Wrestler images — when enabled, a question about a specific wrestler gets a
+# photo (looked up on Wikipedia) sent alongside the text answer. Best-effort:
+# if disabled, no name is found, or the lookup fails, the bot just sends text.
+# Requires wikipedia.org on the host's outbound whitelist (allowed by default
+# on PythonAnywhere's free tier — verified). Set to 0/false/no/off to disable.
+WRESTLER_IMAGES = os.environ.get("WRESTLER_IMAGES", "1").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+
 # Auto-deploy webhook secret. When set, /api/deploy accepts requests
 # that present this value in the X-Deploy-Secret header and runs
 # `git pull` + WSGI reload. When unset, /api/deploy returns 403 — the
