@@ -77,11 +77,6 @@ def _stream_ai_command(message, prompt: str) -> None:
 def cmd_start(message):
     bot.send_message(message.chat.id, _tr(message.from_user.id, "start.greeting"))
 
-@bot.message_handler(commands=["joke"], func=is_allowed)
-def cmd_joke(message):
- reply = ask_ai(message.from_user.id, "Tell one short, joke about wrestling.")
- bot.send_message(message.chat.id, reply)
-
 @bot.message_handler(commands=["help"], func=is_allowed)
 def cmd_help(message):
     lang = get_language(message.from_user.id)
@@ -90,7 +85,6 @@ def cmd_help(message):
         "help.help",
         "help.reset",
         "help.about",
-        "help.joke",
         "help.quote",
         "help.fact",
         "help.quiz",
