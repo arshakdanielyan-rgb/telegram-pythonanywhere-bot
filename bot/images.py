@@ -19,6 +19,8 @@ import requests
 
 from bot.clients import ai, bot
 from bot.config import MODEL, WRESTLER_IMAGES
+from bot.i18n import t
+from bot.preferences import get_language
 
 # Keep enrichment cheap and bounded so it never eats into Telegram's ~60s
 # webhook window: a short extraction call and at most a few quick lookups.
@@ -34,7 +36,11 @@ _EXTRACT_SYSTEM = (
     "Return ONLY a JSON array of the full names of the wrestlers the user is "
     'asking about, using canonical names suitable for a Wikipedia search (e.g. '
     '["John Cena", "Aleksandr Karelin"]). Include professional and '
-    "amateur/Olympic wrestlers. Return an empty array [] if the message names "
+    "amateur/Olympic wrestlers. If a name is shared by several notable people, "
+    "use the context in the message (sport, country, weight class, era, "
+    "competition) to pick the wrestler, and append the Wikipedia "
+    'disambiguation qualifier so the name resolves to that person (e.g. '
+    '"Ali Aliyev (wrestler)"). Return an empty array [] if the message names '
     "no specific wrestler or is a general question. Never invent names."
 )
 
@@ -119,19 +125,34 @@ def _fetch_image(name: str) -> tuple[str, str] | None:
 def send_wrestler_images(message, user_text: str) -> None:
     """Best-effort: send a photo for each specific wrestler named in ``user_text``.
 
-    Never raises — image enrichment must not break the text reply path.
+    For any named wrestler with no verified photo, a short localized note is
+    sent so the user knows the omission is deliberate (not a bug) — the text
+    answer has already gone out, so this only adds context. Never raises —
+    image enrichment must not break the text reply path.
     """
     if not WRESTLER_IMAGES or not user_text:
         return
     try:
+        missing: list[str] = []
         for name in _extract_names(user_text):
             found = _fetch_image(name)
             if not found:
+                missing.append(name)
                 continue
             image_url, title = found
             try:
                 bot.send_photo(message.chat.id, image_url, caption=title)
             except Exception as e:
                 print(f"send_photo failed for {title!r}: {e}")
+        if missing:
+            lang = get_language(message.from_user.id)
+            # Drop any "(wrestler)"-style disambiguation qualifier for display —
+            # it helps the Wikipedia lookup but reads oddly to a user.
+            display = [re.sub(r"\s*\([^)]*\)\s*$", "", n).strip() or n for n in missing]
+            note = t("images.not_found", lang, names=", ".join(display))
+            try:
+                bot.send_message(message.chat.id, note)
+            except Exception as e:
+                print(f"images.not_found note failed: {e}")
     except Exception as e:
         print(f"send_wrestler_images error: {e}")

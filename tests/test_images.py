@@ -221,3 +221,58 @@ def test_send_wrestler_images_never_raises_on_send_failure():
 
         # Must swallow the error — image enrichment can't break the reply path.
         send_wrestler_images(MagicMock(), "x")
+
+
+def test_send_wrestler_images_notes_when_no_image_found():
+    with (
+        patch("bot.images.WRESTLER_IMAGES", True),
+        patch("bot.images._extract_names", return_value=["Ghost Wrestler"]),
+        patch("bot.images._fetch_image", return_value=None),
+        patch("bot.images.get_language", return_value="en"),
+        patch("bot.images.bot") as mock_bot,
+    ):
+        from bot.images import send_wrestler_images
+
+        msg = MagicMock()
+        msg.chat.id = 7
+        send_wrestler_images(msg, "tell me about ghost wrestler")
+        mock_bot.send_photo.assert_not_called()
+        mock_bot.send_message.assert_called_once()
+        args, _ = mock_bot.send_message.call_args
+        assert args[0] == 7
+        assert "Ghost Wrestler" in args[1]
+
+
+def test_send_wrestler_images_note_strips_disambiguation_qualifier():
+    with (
+        patch("bot.images.WRESTLER_IMAGES", True),
+        patch("bot.images._extract_names", return_value=["Ali Aliyev (wrestler)"]),
+        patch("bot.images._fetch_image", return_value=None),
+        patch("bot.images.get_language", return_value="en"),
+        patch("bot.images.bot") as mock_bot,
+    ):
+        from bot.images import send_wrestler_images
+
+        msg = MagicMock()
+        msg.chat.id = 3
+        send_wrestler_images(msg, "who is ali aliyev the wrestler")
+        note = mock_bot.send_message.call_args[0][1]
+        assert "Ali Aliyev" in note
+        assert "(wrestler)" not in note
+
+
+def test_send_wrestler_images_no_note_when_all_found():
+    with (
+        patch("bot.images.WRESTLER_IMAGES", True),
+        patch("bot.images._extract_names", return_value=["John Cena"]),
+        patch("bot.images._fetch_image", return_value=("u", "John Cena")),
+        patch("bot.images.get_language", return_value="en"),
+        patch("bot.images.bot") as mock_bot,
+    ):
+        from bot.images import send_wrestler_images
+
+        msg = MagicMock()
+        msg.chat.id = 9
+        send_wrestler_images(msg, "tell me about cena")
+        mock_bot.send_photo.assert_called_once()
+        mock_bot.send_message.assert_not_called()
