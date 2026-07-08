@@ -87,6 +87,8 @@ telegram-pythonanywhere-bot/
 | `AI_MODEL` | No | `gpt-oss-120b` | Model name for the provider |
 | `HF_SPACE_ID` | No | — | Hugging Face Gradio space ID (e.g. `edisimon/armgpt-demo`) — enables `/model` command when set |
 | `HF_TOKEN` | No | — | HF auth token — only needed if the Gradio space is private or gated |
+| `IMAGE_API_KEY` | No | — | Free Google AI Studio key (get one at https://aistudio.google.com/apikey). When set, enables the `/image` command (text-to-image via Gemini). Endpoint host is under `.googleapis.com`, which is on PA's outbound whitelist. Leave unset to disable the command. Free tier has a daily image quota |
+| `IMAGE_MODEL` | No | `gemini-2.5-flash-image` | Gemini image model for `/image`. Any model that supports the `models:generateContent` endpoint and returns an `inlineData` image part works — override to use a newer one without code changes |
 | `WEBHOOK_SECRET` | No | _auto-generated_ | Random string Telegram echoes back in `X-Telegram-Bot-Api-Secret-Token`. Auto-bootstrapped on first run: if the env var is unset, `bot/config.py::_bootstrap_webhook_secret()` generates a 64-hex secret, persists it to `.webhook_secret` (gitignored, mode 0600), and reuses it on subsequent boots. The boot-time `register_webhook()` then ships it to Telegram. Set the env var to override / share across envs |
 | `WEBHOOK_URL` | No | — | When set, the bot auto-registers this URL as the Telegram webhook on every worker boot and after every `/api/deploy`. No manual `setWebhook` step needed. Idempotent. On PA, value is `https://<your-pa-username>.pythonanywhere.com/api/webhook`. Leave unset for local polling |
 | `RATE_LIMIT` | No | `250` | Max messages per user per day |
@@ -197,6 +199,20 @@ Grounded flow (`ground_wrestlers`):
 **Best-effort by design:** everything is wrapped so it never raises — a disabled flag, no name found, or any network/whitelist failure degrades to a normal ungrounded answer (`ground_wrestlers` returns `(None, [])`). The text reply streams independently, so grounding/enrichment can never block or break an answer. It does add one bounded, short-timeout AI call per message that names a wrestler.
 
 **Whitelist:** `.wikipedia.org` and `.wikimedia.org` are on PythonAnywhere's free-tier outbound whitelist (verified 2026-07-03), so this works on PA out of the box. If you point the lookup at a different image source, re-check the whitelist first (see the PA constraints below).
+
+## Image generation (`/image`)
+
+Optional text-to-image command, enabled only when `IMAGE_API_KEY` is set (mirrors the `HF_SPACE_ID` gating of `/model`). Implemented in `bot/imagegen.py`; the handler is `cmd_image` in `bot/handlers.py`, registered inside `if IMAGE_API_KEY:` so it doesn't exist when unconfigured.
+
+Provider is **Google's Gemini image API** (chosen because its free tier needs only a free API key and the endpoint host is whitelisted on PA). `generate_image(prompt)`:
+1. `POST https://generativelanguage.googleapis.com/v1beta/models/{IMAGE_MODEL}:generateContent` with header `x-goog-api-key: <IMAGE_API_KEY>`, body `{"contents":[{"parts":[{"text": prompt}]}], "generationConfig":{"responseModalities":["TEXT","IMAGE"]}}`, 45s timeout (kept under Telegram's ~60s webhook window). `TEXT` is included in the modalities because some image models reject an image-only list; any text part is ignored.
+2. Parses `candidates[].content.parts[]` for an `inlineData` (or `inline_data`) part, base64-decodes `data`, and returns `(bytes, mime_type)`. The handler sends the bytes via `bot.send_photo` (with the prompt as caption, truncated to Telegram's 1024-char limit) while `keep_typing()` holds the indicator during the slow call.
+
+**Errors** raise `ImageGenError(key, detail)` carrying an i18n key (`image.quota` on 429, `image.blocked` on a safety `promptFeedback.blockReason`, `image.no_image` when the response has no image part, `image.failed` for network/HTTP/auth/parse failures). The handler shows the localized message; the technical `detail` is logged only. A bare `/image` shows `image.usage`.
+
+**Why `generateContent`, not the newer Interactions API:** as of 2026-07 Google's docs push a newer "Interactions API" (`/v1beta/interactions`) and model `gemini-3.1-flash-image`. The bot deliberately uses the stable `models:generateContent` endpoint, which keeps working across model versions — set `IMAGE_MODEL` to a newer model and, as long as it speaks `generateContent` returning an `inlineData` image, no code change is needed. A model reachable *only* via the Interactions API would require adapting `_ENDPOINT` and the response parsing in `bot/imagegen.py`.
+
+**Whitelist:** the endpoint host `generativelanguage.googleapis.com` is covered by the `.googleapis.com` wildcard entry on PA's free-tier whitelist (verified 2026-07-08). `.hf.space` and bare `huggingface.co` (without the `api-inference`/`router` subdomains) are notable non-entries — re-check the whitelist before switching providers.
 
 ## PythonAnywhere deployment
 

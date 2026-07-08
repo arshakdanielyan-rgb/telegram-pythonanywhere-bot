@@ -16,6 +16,7 @@
   "help.quiz": "🧠 /quiz — a wrestling trivia question",
   "help.predictor": "🥊 /predictor — predict a wrestling match winner",
   "help.language": "🌐 /language — change the bot's language",
+  "help.image": "🎨 /image — generate an image from a prompt",
   "help.model": "🔀 /model — switch AI provider",
   "model.current": "Current provider: {provider}\n\nOptions:\n/model main — Cerebras (fast, multilingual, with memory)\n/model hf — ArmGPT (Armenian only, slow, no memory)",
   "model.invalid": "Invalid choice. Use: /model main or /model hf",
@@ -23,5 +24,10 @@
   "model.switched_hf": "Switched to hf (ArmGPT).\n\nNote: this is a tiny base completion model trained only on Armenian text. It will continue whatever you write rather than answer questions, and it does not understand English. Replies take ~30-60s and there is no memory.",
   "model.switched_main": "Switched to the main provider.",
   "predictor.usage": "🥊 Send me two wrestlers to compare, like:\n/predictor John Cena vs Brock Lesnar",
-  "images.not_found": "🔍 I couldn't find a verified photo of {names}."
+  "images.not_found": "🔍 I couldn't find a verified photo of {names}.",
+  "image.usage": "🎨 Send me what to draw, like:\n/image a wrestler celebrating a gold medal, comic book style",
+  "image.failed": "⚠️ Sorry, I couldn't generate that image. Please try again later.",
+  "image.quota": "🚦 The daily image quota has been reached. Please try again tomorrow.",
+  "image.blocked": "🚫 That prompt was blocked by the safety filter. Try describing something different.",
+  "image.no_image": "🤔 I couldn't create an image for that prompt. Try rewording it."
 }
