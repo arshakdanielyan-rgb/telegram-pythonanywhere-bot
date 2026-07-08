@@ -89,13 +89,8 @@ def _extract_names(user_text: str) -> list[str]:
     return out
 
 
-def _fetch_image(name: str) -> tuple[str, str] | None:
-    """Return ``(image_url, page_title)`` for a wrestler, or ``None``.
-
-    Uses Wikipedia's REST summary endpoint. Skips disambiguation pages,
-    entries with no image, and pages that don't look wrestling-related — the
-    last guard stops a photo of a non-wrestler who happens to share the name.
-    """
+def _fetch_summary(name: str) -> dict | None:
+    """Fetch and parse Wikipedia's REST summary for ``name``, or ``None``."""
     title = quote(name.replace(" ", "_"), safe="")
     try:
         r = requests.get(
@@ -105,11 +100,31 @@ def _fetch_image(name: str) -> tuple[str, str] | None:
         )
         if r.status_code != 200:
             return None
-        data = r.json()
+        return r.json()
     except Exception as e:
         print(f"Wikipedia lookup failed for {name!r}: {e}")
         return None
-    if data.get("type") == "disambiguation":
+
+
+def _fetch_image(name: str) -> tuple[str, str] | None:
+    """Return ``(image_url, page_title)`` for a wrestler, or ``None``.
+
+    Uses Wikipedia's REST summary endpoint. Skips disambiguation pages,
+    entries with no image, and pages that don't look wrestling-related — the
+    last guard stops a photo of a non-wrestler who happens to share the name.
+    """
+    data = _fetch_summary(name)
+    if data is None:
+        return None
+    # A bare name can resolve to a disambiguation page when several notable
+    # people share it (e.g. "Arsen Harutyunyan"). Retry once with the
+    # "(wrestler)" qualifier so the lookup lands on the athlete instead of
+    # giving up — unless the extractor already supplied a qualifier.
+    if data.get("type") == "disambiguation" and "(" not in name:
+        data = _fetch_summary(f"{name} (wrestler)")
+        if data is None or data.get("type") == "disambiguation":
+            return None
+    elif data.get("type") == "disambiguation":
         return None
     blurb = f"{data.get('description', '')} {data.get('extract', '')}".lower()
     if "wrestl" not in blurb:

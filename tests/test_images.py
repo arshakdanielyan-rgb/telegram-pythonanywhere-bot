@@ -107,6 +107,45 @@ def test_fetch_image_skips_disambiguation():
         assert _fetch_image("Ambiguous") is None
 
 
+def test_fetch_image_retries_disambiguation_with_wrestler_qualifier():
+    disambig = {
+        "type": "disambiguation",
+        "description": "Topics referred to by the same term",
+        "extract": "Arsen Harutyunyan may refer to:",
+    }
+    wrestler = {
+        "type": "standard",
+        "description": "Armenian wrestler (born 1999)",
+        "extract": "Arsen Harutyunyan is an Armenian freestyle wrestler.",
+        "title": "Arsen Harutyunyan (wrestler)",
+        "thumbnail": {"source": "https://upload.wikimedia.org/arsen.jpg"},
+    }
+    with patch("bot.images.requests") as req:
+        # Bare name -> disambiguation; "(wrestler)" retry -> the athlete's page.
+        req.get.side_effect = [
+            _wiki_response(200, disambig),
+            _wiki_response(200, wrestler),
+        ]
+        from bot.images import _fetch_image
+
+        assert _fetch_image("Arsen Harutyunyan") == (
+            "https://upload.wikimedia.org/arsen.jpg",
+            "Arsen Harutyunyan (wrestler)",
+        )
+        assert req.get.call_count == 2
+
+
+def test_fetch_image_no_retry_when_name_already_qualified():
+    disambig = {"type": "disambiguation", "description": "same term", "extract": ""}
+    with patch("bot.images.requests") as req:
+        req.get.return_value = _wiki_response(200, disambig)
+        from bot.images import _fetch_image
+
+        # Extractor already supplied a qualifier — don't append another.
+        assert _fetch_image("Ali Aliyev (wrestler)") is None
+        assert req.get.call_count == 1
+
+
 def test_fetch_image_skips_non_wrestling_namesake():
     data = {
         "type": "standard",
