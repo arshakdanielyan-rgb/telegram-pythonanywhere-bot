@@ -19,26 +19,55 @@ HANDLER_PATCHES = {
 
 
 def test_handle_message_streams_reply():
-    """handle_message opens a stream for the user's message and pipes the
-    deltas into stream_reply for live editing."""
+    """handle_message grounds on Wikipedia, then opens a stream for the user's
+    message and pipes the deltas into stream_reply for live editing."""
     sentinel = object()  # stands in for the ask_ai_stream generator
     with (
         patch("bot.handlers.should_respond", return_value=True),
         patch("bot.handlers.is_rate_limited", return_value=False),
         patch("bot.handlers.BOT_INFO", MagicMock(username="testbot")),
+        patch("bot.handlers.ground_wrestlers", return_value=(None, [])) as mock_ground,
+        patch("bot.handlers.notify_missing_photos") as mock_notify,
         patch("bot.handlers.ask_ai_stream", return_value=sentinel) as mock_stream,
         patch("bot.handlers.stream_reply", return_value="AI reply") as mock_send,
-        patch("bot.handlers.send_wrestler_images") as mock_images,
         patch("bot.handlers.bot"),
     ):
         from bot.handlers import handle_message
 
         msg = make_message(text="hello")
         handle_message(msg)
-        mock_stream.assert_called_once_with(123, "hello")
+        # Wikipedia grounding runs on the text before the answer streams.
+        mock_ground.assert_called_once_with(msg, "hello")
+        mock_stream.assert_called_once_with(123, "hello", grounding=None)
         mock_send.assert_called_once_with(msg, sentinel)
-        # After the text reply, the wrestler-image enrichment runs on the text.
-        mock_images.assert_called_once_with(msg, "hello")
+        mock_notify.assert_called_once_with(msg, [])
+
+
+def test_handle_message_passes_grounding_and_notes_missing_photos():
+    """A found wrestler's grounding block reaches ask_ai_stream, and any
+    missing-photo names are noted after the reply."""
+    sentinel = object()
+    with (
+        patch("bot.handlers.should_respond", return_value=True),
+        patch("bot.handlers.is_rate_limited", return_value=False),
+        patch("bot.handlers.BOT_INFO", MagicMock(username="testbot")),
+        patch(
+            "bot.handlers.ground_wrestlers",
+            return_value=("WIKI: John Cena ...", ["Rey Mysterio"]),
+        ),
+        patch("bot.handlers.notify_missing_photos") as mock_notify,
+        patch("bot.handlers.ask_ai_stream", return_value=sentinel) as mock_stream,
+        patch("bot.handlers.stream_reply", return_value="AI reply"),
+        patch("bot.handlers.bot"),
+    ):
+        from bot.handlers import handle_message
+
+        msg = make_message(text="tell me about cena and rey")
+        handle_message(msg)
+        mock_stream.assert_called_once_with(
+            123, "tell me about cena and rey", grounding="WIKI: John Cena ..."
+        )
+        mock_notify.assert_called_once_with(msg, ["Rey Mysterio"])
 
 
 def test_handle_message_skips_when_not_responding():
@@ -474,12 +503,13 @@ def test_handle_message_streams_after_rate_limit_check():
             side_effect=lambda uid: call_order.append("rate") or False,
         ),
         patch("bot.handlers.BOT_INFO", MagicMock(username="testbot")),
+        patch("bot.handlers.ground_wrestlers", return_value=(None, [])),
+        patch("bot.handlers.notify_missing_photos"),
         patch(
             "bot.handlers.ask_ai_stream",
-            side_effect=lambda *a: call_order.append("stream"),
+            side_effect=lambda *a, **kw: call_order.append("stream"),
         ),
         patch("bot.handlers.stream_reply", return_value="reply"),
-        patch("bot.handlers.send_wrestler_images"),
         patch("bot.handlers.bot"),
     ):
         from bot.handlers import handle_message

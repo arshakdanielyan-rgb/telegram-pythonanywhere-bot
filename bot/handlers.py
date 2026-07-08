@@ -13,7 +13,7 @@ from bot.helpers import (
 )
 from bot.history import clear_history
 from bot.i18n import SUPPORTED_LANGUAGES, t
-from bot.images import send_wrestler_images
+from bot.images import ground_wrestlers, notify_missing_photos, send_wrestler_images
 from bot.preferences import get_language, get_provider, set_language, set_provider
 from bot.rate_limit import is_rate_limited
 
@@ -281,11 +281,17 @@ def handle_message(message):
         _log(message, "out", f"[rate limited] {limit_msg}")
         return
     try:
-        reply = stream_reply(message, ask_ai_stream(message.from_user.id, text))
+        # Best-effort Wikipedia grounding: if the question names a specific
+        # wrestler, send their photo first (image leads the reply) and answer
+        # from their Wikipedia article as the primary source. Degrades to a
+        # normal answer when nothing is found — never raises.
+        grounding, missing_photos = ground_wrestlers(message, text)
+        reply = stream_reply(
+            message, ask_ai_stream(message.from_user.id, text, grounding=grounding)
+        )
         _log(message, "out", reply)
-        # Best-effort: if the question named a specific wrestler, send a photo
-        # of them below the answer. Never raises; text reply already went out.
-        send_wrestler_images(message, text)
+        # Note any named wrestler we grounded on but had no photo for.
+        notify_missing_photos(message, missing_photos)
     except Exception as e:
         print(f"Error in handle_message: {e}")
         bot.send_message(message.chat.id, _tr(message.from_user.id, "error.generic"))

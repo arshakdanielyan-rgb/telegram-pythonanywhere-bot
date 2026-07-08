@@ -1,14 +1,19 @@
-"""Optional wrestler-photo enrichment.
+"""Optional Wikipedia grounding + photo enrichment for wrestler questions.
 
-When ``WRESTLER_IMAGES`` is enabled, after answering a question that names a
-specific wrestler the bot sends a photo of each wrestler alongside the text
-reply. Photos come from Wikipedia's keyless REST summary endpoint (whitelisted
-on PythonAnywhere's free tier).
+When ``WRESTLER_IMAGES`` is enabled and a question names a specific wrestler,
+the bot answers using that wrestler's Wikipedia article as the primary source:
+``ground_wrestlers()`` sends each wrestler's photo *first* (so the image leads
+the reply) and returns a grounding block for the model, and the caller streams
+an answer built from it. Articles come from Wikipedia's keyless REST summary
+endpoint (whitelisted on PythonAnywhere's free tier).
+
+``send_wrestler_images()`` is the older photo-only path still used by
+``/predictor`` — it sends photos after the text reply, with no grounding.
 
 Everything here is best-effort: feature disabled, no name found, no image,
 disambiguation page, a non-wrestling namesake, or a network/whitelist failure
-all degrade to sending nothing. The text answer is produced and sent by the
-caller first, so image enrichment can never block or break a reply.
+all degrade gracefully. The text answer is streamed independently, so
+enrichment can never block or break a reply.
 """
 
 import json
@@ -106,12 +111,15 @@ def _fetch_summary(name: str) -> dict | None:
         return None
 
 
-def _fetch_image(name: str) -> tuple[str, str] | None:
-    """Return ``(image_url, page_title)`` for a wrestler, or ``None``.
+def _fetch_wiki(name: str) -> dict | None:
+    """Return a wrestler's Wikipedia article as a dict, or ``None``.
 
-    Uses Wikipedia's REST summary endpoint. Skips disambiguation pages,
-    entries with no image, and pages that don't look wrestling-related — the
-    last guard stops a photo of a non-wrestler who happens to share the name.
+    The dict has ``title``, ``description``, ``extract`` (the intro paragraph,
+    used to ground the answer) and ``image`` (a photo URL or ``None``). Uses
+    Wikipedia's REST summary endpoint. Skips disambiguation pages and pages
+    that don't look wrestling-related — the latter stops grounding on / showing
+    a photo of a non-wrestler who happens to share the name. An article with no
+    photo is still returned (it is a valid source for the text answer).
     """
     data = _fetch_summary(name)
     if data is None:
@@ -132,9 +140,123 @@ def _fetch_image(name: str) -> tuple[str, str] | None:
     image = (data.get("thumbnail") or {}).get("source") or (
         data.get("originalimage") or {}
     ).get("source")
-    if not image:
+    return {
+        "title": data.get("title") or name,
+        "description": data.get("description") or "",
+        "extract": data.get("extract") or "",
+        "image": image,
+    }
+
+
+def _fetch_image(name: str) -> tuple[str, str] | None:
+    """Return ``(image_url, page_title)`` for a wrestler, or ``None``.
+
+    Thin wrapper over :func:`_fetch_wiki` for the photo-only path
+    (``send_wrestler_images``): drops articles that have no usable photo.
+    """
+    info = _fetch_wiki(name)
+    if info is None or not info["image"]:
         return None
-    return image, data.get("title") or name
+    return info["image"], info["title"]
+
+
+def _strip_qualifier(name: str) -> str:
+    """Drop a trailing "(wrestler)"-style disambiguation qualifier for display."""
+    return re.sub(r"\s*\([^)]*\)\s*$", "", name).strip() or name
+
+
+_GROUNDING_HEADER = (
+    "Use the following Wikipedia information as your PRIMARY source for this "
+    "answer. Base the wrestler's career, achievements, nationality, weight "
+    "class, and Olympic or World Championship results on it, and do not "
+    "contradict it or invent statistics."
+)
+
+
+def _build_grounding(sources: list[dict], no_article: list[str]) -> str | None:
+    """Assemble the grounding block passed to the model, or ``None``.
+
+    ``sources`` are found articles; ``no_article`` are named wrestlers with no
+    Wikipedia page — the model is told to say so and not fabricate, per the
+    "state clearly when no article is found" requirement.
+    """
+    if not sources and not no_article:
+        return None
+    lines = [_GROUNDING_HEADER]
+    for s in sources:
+        lines.append(f"\n== {s['title']} ==")
+        if s["description"]:
+            lines.append(s["description"])
+        if s["extract"]:
+            lines.append(s["extract"])
+    for name in no_article:
+        lines.append(
+            f"\n== {_strip_qualifier(name)} ==\nNo Wikipedia article was found. "
+            "Tell the user no article was found for this name, then answer only "
+            "from well-established facts without fabricating anything."
+        )
+    return "\n".join(lines)
+
+
+def ground_wrestlers(message, user_text: str) -> tuple[str | None, list[str]]:
+    """Look up the wrestlers named in ``user_text`` on Wikipedia.
+
+    Sends each found wrestler's photo *first* (so the image leads the reply)
+    and returns ``(grounding, missing_photo_names)``:
+
+    * ``grounding`` — a source block to pass as
+      ``ask_ai_stream(..., grounding=grounding)``, or ``None`` when the feature
+      is off, no specific wrestler is named, or the lookup fails.
+    * ``missing_photo_names`` — wrestlers whose article was found but had no
+      usable photo; the caller sends a note about them after the text reply.
+
+    Never raises — any failure degrades to ``(None, [])`` and a normal answer.
+    """
+    if not WRESTLER_IMAGES or not user_text:
+        return None, []
+    try:
+        names = _extract_names(user_text)
+        if not names:
+            return None, []
+        sources: list[dict] = []
+        missing_photo: list[str] = []
+        no_article: list[str] = []
+        for name in names:
+            info = _fetch_wiki(name)
+            if info is None:
+                no_article.append(name)
+                continue
+            sources.append(info)
+            if info["image"]:
+                try:
+                    bot.send_photo(
+                        message.chat.id, info["image"], caption=info["title"]
+                    )
+                except Exception as e:
+                    print(f"send_photo failed for {info['title']!r}: {e}")
+            else:
+                missing_photo.append(name)
+        return _build_grounding(sources, no_article), missing_photo
+    except Exception as e:
+        print(f"ground_wrestlers error: {e}")
+        return None, []
+
+
+def notify_missing_photos(message, names: list[str]) -> None:
+    """Send the localized 'no photo found' note for ``names`` (best-effort).
+
+    Called after the text reply so a named wrestler with no Wikipedia photo
+    reads as a deliberate omission, not a bug. No-op for an empty list.
+    """
+    if not names:
+        return
+    try:
+        lang = get_language(message.from_user.id)
+        display = [_strip_qualifier(n) for n in names]
+        note = t("images.not_found", lang, names=", ".join(display))
+        bot.send_message(message.chat.id, note)
+    except Exception as e:
+        print(f"images.not_found note failed: {e}")
 
 
 def send_wrestler_images(message, user_text: str) -> None:
@@ -159,15 +281,6 @@ def send_wrestler_images(message, user_text: str) -> None:
                 bot.send_photo(message.chat.id, image_url, caption=title)
             except Exception as e:
                 print(f"send_photo failed for {title!r}: {e}")
-        if missing:
-            lang = get_language(message.from_user.id)
-            # Drop any "(wrestler)"-style disambiguation qualifier for display —
-            # it helps the Wikipedia lookup but reads oddly to a user.
-            display = [re.sub(r"\s*\([^)]*\)\s*$", "", n).strip() or n for n in missing]
-            note = t("images.not_found", lang, names=", ".join(display))
-            try:
-                bot.send_message(message.chat.id, note)
-            except Exception as e:
-                print(f"images.not_found note failed: {e}")
+        notify_missing_photos(message, missing)
     except Exception as e:
         print(f"send_wrestler_images error: {e}")
