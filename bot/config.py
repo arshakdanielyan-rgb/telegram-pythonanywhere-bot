@@ -99,28 +99,6 @@ SQLITE_PATH = os.environ.get("SQLITE_PATH", "").strip()
 # that is the documented deployment target. Override to suit your host.
 HOSTING_LABEL = os.environ.get("HOSTING_LABEL", "PythonAnywhere").strip()
 
-# Wrestler images — when enabled, a question about a specific wrestler gets a
-# photo (looked up on Wikipedia) sent alongside the text answer. Best-effort:
-# if disabled, no name is found, or the lookup fails, the bot just sends text.
-# Requires wikipedia.org on the host's outbound whitelist (allowed by default
-# on PythonAnywhere's free tier — verified). Set to 0/false/no/off to disable.
-WRESTLER_IMAGES = os.environ.get("WRESTLER_IMAGES", "1").strip().lower() in (
-    "1",
-    "true",
-    "yes",
-    "on",
-)
-
-# AI image generation (optional). When IMAGE_API_KEY is set, the /image
-# command is registered. It uses Google's Gemini image API — the free tier
-# gives a daily image quota, and a key is free to create at
-# https://aistudio.google.com/apikey. The endpoint host is under
-# .googleapis.com, which is on PythonAnywhere's outbound whitelist. Leave
-# unset to disable the command. IMAGE_MODEL can point at a newer model as
-# long as it supports the models:generateContent endpoint (see bot/imagegen.py).
-IMAGE_API_KEY = os.environ.get("IMAGE_API_KEY", "").strip()
-IMAGE_MODEL = os.environ.get("IMAGE_MODEL", "gemini-2.5-flash-image").strip()
-
 # Auto-deploy webhook secret. When set, /api/deploy accepts requests
 # that present this value in the X-Deploy-Secret header and runs
 # `git pull` + WSGI reload. When unset, /api/deploy returns 403 — the

@@ -19,15 +19,13 @@ HANDLER_PATCHES = {
 
 
 def test_handle_message_streams_reply():
-    """handle_message grounds on Wikipedia, then opens a stream for the user's
-    message and pipes the deltas into stream_reply for live editing."""
+    """handle_message opens a stream for the user's message and pipes the
+    deltas into stream_reply for live editing."""
     sentinel = object()  # stands in for the ask_ai_stream generator
     with (
         patch("bot.handlers.should_respond", return_value=True),
         patch("bot.handlers.is_rate_limited", return_value=False),
         patch("bot.handlers.BOT_INFO", MagicMock(username="testbot")),
-        patch("bot.handlers.ground_wrestlers", return_value=(None, [])) as mock_ground,
-        patch("bot.handlers.notify_missing_photos") as mock_notify,
         patch("bot.handlers.ask_ai_stream", return_value=sentinel) as mock_stream,
         patch("bot.handlers.stream_reply", return_value="AI reply") as mock_send,
         patch("bot.handlers.bot"),
@@ -36,38 +34,8 @@ def test_handle_message_streams_reply():
 
         msg = make_message(text="hello")
         handle_message(msg)
-        # Wikipedia grounding runs on the text before the answer streams.
-        mock_ground.assert_called_once_with(msg, "hello")
-        mock_stream.assert_called_once_with(123, "hello", grounding=None)
+        mock_stream.assert_called_once_with(123, "hello")
         mock_send.assert_called_once_with(msg, sentinel)
-        mock_notify.assert_called_once_with(msg, [])
-
-
-def test_handle_message_passes_grounding_and_notes_missing_photos():
-    """A found wrestler's grounding block reaches ask_ai_stream, and any
-    missing-photo names are noted after the reply."""
-    sentinel = object()
-    with (
-        patch("bot.handlers.should_respond", return_value=True),
-        patch("bot.handlers.is_rate_limited", return_value=False),
-        patch("bot.handlers.BOT_INFO", MagicMock(username="testbot")),
-        patch(
-            "bot.handlers.ground_wrestlers",
-            return_value=("WIKI: John Cena ...", ["Rey Mysterio"]),
-        ),
-        patch("bot.handlers.notify_missing_photos") as mock_notify,
-        patch("bot.handlers.ask_ai_stream", return_value=sentinel) as mock_stream,
-        patch("bot.handlers.stream_reply", return_value="AI reply"),
-        patch("bot.handlers.bot"),
-    ):
-        from bot.handlers import handle_message
-
-        msg = make_message(text="tell me about cena and rey")
-        handle_message(msg)
-        mock_stream.assert_called_once_with(
-            123, "tell me about cena and rey", grounding="WIKI: John Cena ..."
-        )
-        mock_notify.assert_called_once_with(msg, ["Rey Mysterio"])
 
 
 def test_handle_message_skips_when_not_responding():
@@ -243,7 +211,6 @@ def test_cmd_predictor_streams_prediction():
     with (
         patch("bot.handlers.ask_ai_stream", return_value=sentinel) as mock_ask,
         patch("bot.handlers.stream_reply", return_value="reply") as mock_send,
-        patch("bot.handlers.send_wrestler_images") as mock_images,
         patch("bot.handlers.bot"),
     ):
         from bot.handlers import cmd_predictor
@@ -253,8 +220,6 @@ def test_cmd_predictor_streams_prediction():
         assert mock_ask.call_args[0][0] == 123
         assert "John Cena vs Brock Lesnar" in mock_ask.call_args[0][1]
         mock_send.assert_called_once_with(msg, sentinel)
-        # Photos are requested for the wrestlers in the matchup text.
-        mock_images.assert_called_once_with(msg, "John Cena vs Brock Lesnar")
 
 
 def test_cmd_predictor_usage_hint_when_no_names():
@@ -277,101 +242,11 @@ def test_cmd_predictor_survives_ai_error():
     with (
         patch("bot.handlers.ask_ai_stream"),
         patch("bot.handlers.stream_reply", side_effect=Exception("boom")),
-        patch("bot.handlers.send_wrestler_images"),
         patch("bot.handlers.bot") as mock_bot,
     ):
         from bot.handlers import cmd_predictor
 
         cmd_predictor(make_message(text="/predictor Alice vs Bob"))
-        assert "went wrong" in mock_bot.send_message.call_args[0][1].lower()
-
-
-# ── /image command ──────────────────────────────────────────────────
-
-
-def _import_cmd_image_enabled():
-    """Re-import handlers with IMAGE_API_KEY set so cmd_image is registered."""
-    import importlib
-    import bot.config
-    import bot.handlers
-
-    original = bot.config.IMAGE_API_KEY
-    bot.config.IMAGE_API_KEY = "fake-image-key"
-    bot.handlers.IMAGE_API_KEY = "fake-image-key"
-    importlib.reload(bot.handlers)
-    cmd_image = getattr(bot.handlers, "cmd_image", None)
-    bot.config.IMAGE_API_KEY = original
-    bot.handlers.IMAGE_API_KEY = original
-    return cmd_image
-
-
-def test_cmd_image_registered_only_with_key():
-    """Without IMAGE_API_KEY, cmd_image must not exist."""
-    import importlib
-    import bot.config
-    import bot.handlers
-
-    bot.config.IMAGE_API_KEY = ""
-    bot.handlers.IMAGE_API_KEY = ""
-    if hasattr(bot.handlers, "cmd_image"):
-        delattr(bot.handlers, "cmd_image")
-    importlib.reload(bot.handlers)
-    assert not hasattr(bot.handlers, "cmd_image")
-
-
-def test_cmd_image_usage_hint_when_no_prompt():
-    cmd_image = _import_cmd_image_enabled()
-    assert cmd_image is not None
-    with (
-        patch("bot.handlers.generate_image") as mock_gen,
-        patch("bot.handlers.bot") as mock_bot,
-    ):
-        cmd_image(make_message(text="/image"))
-        mock_gen.assert_not_called()
-        assert "draw" in mock_bot.send_message.call_args[0][1].lower()
-
-
-def test_cmd_image_generates_and_sends_photo():
-    cmd_image = _import_cmd_image_enabled()
-    with (
-        patch("bot.handlers.generate_image", return_value=(b"imgbytes", "image/png")) as mock_gen,
-        patch("bot.handlers.keep_typing"),
-        patch("bot.handlers.bot") as mock_bot,
-    ):
-        cmd_image(make_message(text="/image a red dragon"))
-        mock_gen.assert_called_once_with("a red dragon")
-        args, kwargs = mock_bot.send_photo.call_args
-        assert args[0] == 456  # chat id
-        assert args[1] == b"imgbytes"
-        assert kwargs["caption"] == "a red dragon"
-
-
-def test_cmd_image_shows_localized_error_on_imagegen_error():
-    cmd_image = _import_cmd_image_enabled()
-    from bot.imagegen import ImageGenError
-
-    with (
-        patch(
-            "bot.handlers.generate_image",
-            side_effect=ImageGenError("image.quota", "429"),
-        ),
-        patch("bot.handlers.keep_typing"),
-        patch("bot.handlers.bot") as mock_bot,
-    ):
-        cmd_image(make_message(text="/image busy day"))
-        mock_bot.send_photo.assert_not_called()
-        sent = mock_bot.send_message.call_args[0][1]
-        assert "quota" in sent.lower()
-
-
-def test_cmd_image_generic_error_on_unexpected_exception():
-    cmd_image = _import_cmd_image_enabled()
-    with (
-        patch("bot.handlers.generate_image", side_effect=RuntimeError("boom")),
-        patch("bot.handlers.keep_typing"),
-        patch("bot.handlers.bot") as mock_bot,
-    ):
-        cmd_image(make_message(text="/image x"))
         assert "went wrong" in mock_bot.send_message.call_args[0][1].lower()
 
 
@@ -592,8 +467,6 @@ def test_handle_message_streams_after_rate_limit_check():
             side_effect=lambda uid: call_order.append("rate") or False,
         ),
         patch("bot.handlers.BOT_INFO", MagicMock(username="testbot")),
-        patch("bot.handlers.ground_wrestlers", return_value=(None, [])),
-        patch("bot.handlers.notify_missing_photos"),
         patch(
             "bot.handlers.ask_ai_stream",
             side_effect=lambda *a, **kw: call_order.append("stream"),

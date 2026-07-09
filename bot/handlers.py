@@ -2,7 +2,7 @@ import os
 from datetime import datetime
 from telebot import types
 from bot.clients import bot, BOT_INFO
-from bot.config import COMMIT_SHA, HF_SPACE_ID, IMAGE_API_KEY, RATE_LIMIT
+from bot.config import COMMIT_SHA, HF_SPACE_ID, RATE_LIMIT
 from bot.ai import ask_ai, ask_ai_stream
 from bot.helpers import (
     is_allowed,
@@ -13,8 +13,6 @@ from bot.helpers import (
 )
 from bot.history import clear_history
 from bot.i18n import SUPPORTED_LANGUAGES, t
-from bot.imagegen import ImageGenError, generate_image
-from bot.images import ground_wrestlers, notify_missing_photos, send_wrestler_images
 from bot.preferences import get_language, get_provider, set_language, set_provider
 from bot.rate_limit import is_rate_limited
 
@@ -94,8 +92,6 @@ def cmd_help(message):
         "help.predictor",
         "help.language",
     ]
-    if IMAGE_API_KEY:
-        keys.append("help.image")
     if HF_SPACE_ID:
         keys.append("help.model")
     command_list = t("help.header", lang) + "\n\n" + "\n".join(t(k, lang) for k in keys)
@@ -177,41 +173,6 @@ def cmd_predictor(message):
         "fun prediction, not a real result, and never invent statistics."
     )
     _stream_ai_command(message, prompt)
-    # Include a photo of each wrestler in the matchup (best-effort).
-    send_wrestler_images(message, matchup)
-
-
-if IMAGE_API_KEY:
-
-    @bot.message_handler(commands=["image"], func=is_allowed)
-    def cmd_image(message):
-        """Generate an image from the user's prompt via Google's Gemini API.
-
-        Registered only when IMAGE_API_KEY is set. The typing indicator runs
-        while the (slow) generation is in flight; failures show a short
-        localized reason instead of crashing the worker.
-        """
-        parts = (message.text or "").split(maxsplit=1)
-        prompt = parts[1].strip() if len(parts) > 1 else ""
-        if not prompt:
-            bot.send_message(message.chat.id, _tr(message.from_user.id, "image.usage"))
-            return
-        _log(message, "in", f"/image {prompt}")
-        try:
-            with keep_typing(message.chat.id):
-                image_bytes, _mime = generate_image(prompt)
-            # Telegram caps caption length at 1024 chars.
-            bot.send_photo(message.chat.id, image_bytes, caption=prompt[:1024])
-            _log(message, "out", "[image sent]")
-        except ImageGenError as e:
-            bot.send_message(message.chat.id, _tr(message.from_user.id, e.key))
-            _log(message, "out", f"[image error] {e}")
-        except Exception as e:
-            print(f"Error in cmd_image: {e}")
-            bot.send_message(
-                message.chat.id, _tr(message.from_user.id, "error.generic")
-            )
-            _log(message, "out", f"[image error] {e}")
 
 
 # Prefix for the inline-button callbacks emitted by the /language menu.
@@ -317,17 +278,10 @@ def handle_message(message):
         _log(message, "out", f"[rate limited] {limit_msg}")
         return
     try:
-        # Best-effort Wikipedia grounding: if the question names a specific
-        # wrestler, send their photo first (image leads the reply) and answer
-        # from their Wikipedia article as the primary source. Degrades to a
-        # normal answer when nothing is found — never raises.
-        grounding, missing_photos = ground_wrestlers(message, text)
         reply = stream_reply(
-            message, ask_ai_stream(message.from_user.id, text, grounding=grounding)
+            message, ask_ai_stream(message.from_user.id, text)
         )
         _log(message, "out", reply)
-        # Note any named wrestler we grounded on but had no photo for.
-        notify_missing_photos(message, missing_photos)
     except Exception as e:
         print(f"Error in handle_message: {e}")
         bot.send_message(message.chat.id, _tr(message.from_user.id, "error.generic"))

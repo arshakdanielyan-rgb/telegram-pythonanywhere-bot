@@ -56,42 +56,6 @@ def test_ask_ai_passes_user_id_to_generate():
         assert mock_gen.call_args[0][0] == 456
 
 
-def test_ask_ai_injects_grounding_as_ephemeral_system_message():
-    """A grounding block is passed to the model as a second system message but
-    is NOT persisted to history."""
-    with (
-        patch("bot.ai.generate", return_value="ok") as mock_gen,
-        patch("bot.ai.get_history", return_value=[]),
-        patch("bot.ai.save_history") as mock_save,
-    ):
-        from bot.ai import ask_ai
-
-        ask_ai(123, "who is cena?", grounding="WIKI: John Cena is a wrestler.")
-        sent = mock_gen.call_args[0][1]
-        assert sent[0]["role"] == "system"  # base system prompt
-        assert sent[1] == {
-            "role": "system",
-            "content": "WIKI: John Cena is a wrestler.",
-        }
-        assert sent[2] == {"role": "user", "content": "who is cena?"}
-        # Grounding must not leak into saved history.
-        saved = mock_save.call_args[0][1]
-        assert all("WIKI:" not in m["content"] for m in saved)
-
-
-def test_ask_ai_stream_injects_grounding():
-    with (
-        patch("bot.ai.generate_stream", return_value=iter(["ok"])) as mock_gen,
-        patch("bot.ai.get_history", return_value=[]),
-        patch("bot.ai.save_history"),
-    ):
-        from bot.ai import ask_ai_stream
-
-        list(ask_ai_stream(123, "who is cena?", grounding="WIKI: source"))
-        sent = mock_gen.call_args[0][1]
-        assert sent[1] == {"role": "system", "content": "WIKI: source"}
-
-
 # ── ask_ai_stream ───────────────────────────────────────────────────────────────
 
 
