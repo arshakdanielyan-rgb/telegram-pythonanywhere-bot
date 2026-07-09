@@ -90,6 +90,7 @@ def cmd_help(message):
         "help.quote",
         "help.fact",
         "help.quiz",
+        "help.joke",
         "help.predictor",
         "help.language",
     ]
@@ -154,6 +155,15 @@ def cmd_quiz(message):
         "question only — no answer, no multiple-choice options unless it "
         "helps. Keep it to one or two sentences and invite them to reply "
         "with their guess.",
+    )
+
+
+@bot.message_handler(commands=["joke"], func=is_allowed)
+def cmd_joke(message):
+    _stream_ai_command(
+        message,
+        "Tell one short, family-friendly wrestling joke. Keep it to a "
+        "sentence or two.",
     )
 
 

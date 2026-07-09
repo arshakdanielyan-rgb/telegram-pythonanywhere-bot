@@ -191,6 +191,10 @@ def test_cmd_fact_streams_fact():
     _assert_streams_prompt_keyword("cmd_fact", "fact")
 
 
+def test_cmd_joke_streams_joke():
+    _assert_streams_prompt_keyword("cmd_joke", "joke")
+
+
 def test_cmd_quote_survives_ai_error():
     """A failure in the AI stream must send a generic error, not crash."""
     with (
