@@ -30,6 +30,7 @@ telegram-pythonanywhere-bot/
 │   ├── rate_limit.py     # Per-user daily message rate limiting via store (graceful degradation)
 │   ├── dedupe.py         # Drops repeated update_ids when Telegram retries (graceful degradation)
 │   ├── helpers.py        # send_reply(), keep_typing() context manager, should_respond() utilities
+│   ├── images.py         # send_wrestler_images() — Wikipedia + Wikimedia Commons photo lookup
 │   └── handlers.py       # All Telegram command and message handlers — add new commands here
 ├── tests/
 │   ├── conftest.py       # Mocks env vars and external packages (telebot, openai, flask)
@@ -38,6 +39,7 @@ telegram-pythonanywhere-bot/
 │   ├── test_preferences.py
 │   ├── test_handlers.py
 │   ├── test_helpers.py
+│   ├── test_images.py    # _extract_names(), _fetch_wiki(), _fetch_commons_image(), _resolve_image()
 │   ├── test_history.py
 │   ├── test_rate_limit.py
 │   ├── test_dedupe.py
@@ -90,6 +92,7 @@ telegram-pythonanywhere-bot/
 | `RATE_LIMIT` | No | `250` | Max messages per user per day |
 | `ALLOWED_USERS` | No | _open_ | Comma-separated whitelist of usernames (with/without `@`) or numeric user IDs. Empty = everyone allowed. Non-empty = silent drop for non-whitelisted (no rejection reply, no leak of bot existence). Implemented as `func=is_allowed` on every `@bot.message_handler` so telebot never dispatches the handler |
 | `HOSTING_LABEL` | No | `PythonAnywhere` | Label shown by the `/about` command |
+| `WRESTLER_IMAGES` | No | `1` (on) | When enabled, a question naming a specific wrestler (and the `/predictor` matchup) gets a verified photo — the wrestler's Wikipedia infobox image, or a Wikimedia Commons file matched by surname when the article has none. See "Wrestler images" below. Set to `0`/`false`/`no`/`off` to disable |
 | `DEPLOY_SECRET` | No | — | Enables `/api/deploy` auto-deploy webhook. Fail-closed: when unset, the endpoint returns 403. Generate with `openssl rand -hex 32` and set the same value as a GitHub repo secret named `DEPLOY_SECRET` so the workflow at `.github/workflows/deploy.yml` can call the endpoint |
 | `PA_WSGI_PATH` | No | _auto-detected_ | Absolute path of the PA WSGI file `/api/deploy` touches to reload the worker. Only needed when auto-detection fails (non-default PA layout / custom domain) — the deploy response says so explicitly when that happens |
 
@@ -177,6 +180,22 @@ The bot's storage layer is a thin KV-with-TTL abstraction in `bot/store.py` expo
 - **Typing indicator during slow calls:** `keep_typing()` in `bot/helpers.py` spawns a daemon thread that re-sends `send_chat_action(chat_id, "typing")` every 4 seconds (Telegram's typing action expires after ~5s). On context exit the thread is signalled and joined with a 2s timeout so the request shuts down cleanly. Proxy 503s from PA's outbound proxy are caught and logged; the thread keeps looping.
 
 ---
+
+## Wrestler images
+
+When `WRESTLER_IMAGES` is enabled (default) and a message names a specific wrestler, the bot sends that wrestler's photo into the chat. Implemented in `bot/images.py`; wired into `handle_message` (after the text reply) and `/predictor` (after the streamed prediction) via `send_wrestler_images(message, text)`. This is a **photo-only** feature — it does not alter the text answer (no Wikipedia text grounding).
+
+Per named wrestler (`_resolve_image`):
+1. `_extract_names()` makes one short, non-streaming AI call (`ai.chat.completions.create`, 8s timeout, `max_tokens=80`, always the **main** provider) asking for a JSON array of the specific wrestlers named. Returns `[]` for general questions, so the lookup only runs when a real wrestler is named. De-duped case-insensitively, capped at `_MAX_IMAGES` (3). When a name is shared by several people the prompt tells the model to disambiguate from context and append the Wikipedia qualifier (e.g. `"Ali Aliyev (wrestler)"`).
+2. `_fetch_wiki()` calls Wikipedia's keyless REST summary endpoint (`https://en.wikipedia.org/api/rest_v1/page/summary/<title>`) with a descriptive `User-Agent`. A **disambiguation** page for a bare name retries once with the `(wrestler)` qualifier. It **rejects** pages whose `description`+`extract` don't contain `"wrestl"` — the identity guard that stops a same-named non-wrestler's photo from being shown. Returns `{title, image}`, where `image` is the infobox photo (`thumbnail.source` → `originalimage.source`, both Wikimedia-hosted) or `None`.
+3. **Wikimedia Commons fallback** — if the confirmed wrestler article has no infobox photo, `_fetch_commons_image()` searches Commons (`https://commons.wikimedia.org/w/api.php`, `generator=search`, File namespace) by the canonical title and returns the first result that is a raster image (`image/jpeg|png|gif|webp` — SVG logos/flags skipped) **and** has the wrestler's surname in the filename. The surname check is the verification guard against a generic search returning the wrong person. Commons is only reached *after* Wikipedia has confirmed the name is a wrestler.
+4. If neither Wikipedia nor Commons yields a verified image, the wrestler is collected as "missing"; `notify_missing_photos()` sends one localized note (`images.not_found`, `{names}` placeholder, `(...)` qualifiers stripped for display) so the omission reads as deliberate.
+
+Photos are sent with `bot.send_photo(chat_id, image_url, caption=title)` — Telegram fetches the `upload.wikimedia.org` URL itself, so the download does **not** count against PA's outbound whitelist; only the summary/search API calls do.
+
+**Best-effort by design:** everything is wrapped so it never raises — a disabled flag, no name found, no image, a disambiguation page, a non-wrestling namesake, or any network/whitelist failure degrades to a text-only answer. It adds one bounded, short-timeout AI call per message that names a wrestler.
+
+**Whitelist:** `.wikipedia.org` and `.wikimedia.org` (covering both `en.wikipedia.org` and `commons.wikimedia.org`) are on PythonAnywhere's free-tier outbound whitelist (verified 2026-07-03). If you point the lookup at a different image source, re-check the whitelist first (see the PA constraints below).
 
 ## PythonAnywhere deployment
 

@@ -13,6 +13,7 @@ from bot.helpers import (
 )
 from bot.history import clear_history
 from bot.i18n import SUPPORTED_LANGUAGES, t
+from bot.images import send_wrestler_images
 from bot.preferences import get_language, get_provider, set_language, set_provider
 from bot.rate_limit import is_rate_limited
 
@@ -173,6 +174,8 @@ def cmd_predictor(message):
         "fun prediction, not a real result, and never invent statistics."
     )
     _stream_ai_command(message, prompt)
+    # Include a photo of each wrestler in the matchup (best-effort).
+    send_wrestler_images(message, matchup)
 
 
 # Prefix for the inline-button callbacks emitted by the /language menu.
@@ -282,6 +285,9 @@ def handle_message(message):
             message, ask_ai_stream(message.from_user.id, text)
         )
         _log(message, "out", reply)
+        # Best-effort: if the question names a specific wrestler, send their
+        # verified photo (Wikipedia, then Wikimedia Commons) after the reply.
+        send_wrestler_images(message, text)
     except Exception as e:
         print(f"Error in handle_message: {e}")
         bot.send_message(message.chat.id, _tr(message.from_user.id, "error.generic"))

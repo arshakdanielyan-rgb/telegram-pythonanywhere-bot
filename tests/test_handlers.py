@@ -19,8 +19,8 @@ HANDLER_PATCHES = {
 
 
 def test_handle_message_streams_reply():
-    """handle_message opens a stream for the user's message and pipes the
-    deltas into stream_reply for live editing."""
+    """handle_message opens a stream for the user's message, pipes the deltas
+    into stream_reply for live editing, then sends any wrestler photo."""
     sentinel = object()  # stands in for the ask_ai_stream generator
     with (
         patch("bot.handlers.should_respond", return_value=True),
@@ -28,6 +28,7 @@ def test_handle_message_streams_reply():
         patch("bot.handlers.BOT_INFO", MagicMock(username="testbot")),
         patch("bot.handlers.ask_ai_stream", return_value=sentinel) as mock_stream,
         patch("bot.handlers.stream_reply", return_value="AI reply") as mock_send,
+        patch("bot.handlers.send_wrestler_images") as mock_images,
         patch("bot.handlers.bot"),
     ):
         from bot.handlers import handle_message
@@ -36,6 +37,8 @@ def test_handle_message_streams_reply():
         handle_message(msg)
         mock_stream.assert_called_once_with(123, "hello")
         mock_send.assert_called_once_with(msg, sentinel)
+        # Photo enrichment runs on the user's text after the reply.
+        mock_images.assert_called_once_with(msg, "hello")
 
 
 def test_handle_message_skips_when_not_responding():
@@ -211,6 +214,7 @@ def test_cmd_predictor_streams_prediction():
     with (
         patch("bot.handlers.ask_ai_stream", return_value=sentinel) as mock_ask,
         patch("bot.handlers.stream_reply", return_value="reply") as mock_send,
+        patch("bot.handlers.send_wrestler_images") as mock_images,
         patch("bot.handlers.bot"),
     ):
         from bot.handlers import cmd_predictor
@@ -220,6 +224,8 @@ def test_cmd_predictor_streams_prediction():
         assert mock_ask.call_args[0][0] == 123
         assert "John Cena vs Brock Lesnar" in mock_ask.call_args[0][1]
         mock_send.assert_called_once_with(msg, sentinel)
+        # Photos are requested for the wrestlers in the matchup text.
+        mock_images.assert_called_once_with(msg, "John Cena vs Brock Lesnar")
 
 
 def test_cmd_predictor_usage_hint_when_no_names():
@@ -242,6 +248,7 @@ def test_cmd_predictor_survives_ai_error():
     with (
         patch("bot.handlers.ask_ai_stream"),
         patch("bot.handlers.stream_reply", side_effect=Exception("boom")),
+        patch("bot.handlers.send_wrestler_images"),
         patch("bot.handlers.bot") as mock_bot,
     ):
         from bot.handlers import cmd_predictor
@@ -472,6 +479,7 @@ def test_handle_message_streams_after_rate_limit_check():
             side_effect=lambda *a, **kw: call_order.append("stream"),
         ),
         patch("bot.handlers.stream_reply", return_value="reply"),
+        patch("bot.handlers.send_wrestler_images"),
         patch("bot.handlers.bot"),
     ):
         from bot.handlers import handle_message
