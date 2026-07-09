@@ -1,15 +1,25 @@
 name: Deploy to PythonAnywhere
 
 # Triggers the bot's /api/deploy endpoint on every push to main, which
-# fetches + hard-resets the checkout on PA to origin's tip, reinstalls
-# dependencies if requirements.txt changed, and reloads the worker.
-# A second step then polls /api/health until the pushed commit's SHA is
-# actually being served — so "green run" means "the bot is running this
-# commit", not just "the server said OK". Requires two GitHub repo
-# secrets:
+# fetches + hard-resets the checkout on PA to origin's tip and reinstalls
+# dependencies if requirements.txt changed. The next step then reloads the
+# PA worker via PythonAnywhere's API, and a final step polls /api/health
+# until the pushed commit's SHA is actually being served — so "green run"
+# means "the bot is running this commit", not just "the server said OK".
+#
+# Why reload via the API instead of /api/deploy touching the WSGI file:
+# touching the WSGI file does NOT reliably reload the worker on this account
+# (observed: /api/health kept serving an old commit after a successful
+# touch). The GitHub runner has open outbound access, so it can call PA's
+# reload API directly; the PA worker itself is behind the free-tier
+# outbound whitelist and can't be relied on to reach the API.
+#
+# Requires these GitHub repo secrets:
 #
 #   PA_DEPLOY_URL    e.g. https://<your-pa-username>.pythonanywhere.com/api/deploy
 #   DEPLOY_SECRET    must match the DEPLOY_SECRET in PA's .env
+#   PA_API_TOKEN     PA account page -> "API token" (used only to reload the
+#                    web app; username + domain are derived from PA_DEPLOY_URL)
 #
 # Add them in your repo: Settings -> Secrets and variables -> Actions.
 
@@ -51,6 +61,39 @@ jobs:
             --max-time 240 \
             --retry 2 --retry-delay 10 --retry-all-errors \
             "$PA_DEPLOY_URL"
+
+      - name: Reload the PA worker
+        # /api/deploy updates the code on disk, but touching the WSGI file
+        # doesn't reliably restart the worker on this account — so force the
+        # reload through PythonAnywhere's API from the runner (open outbound).
+        # The username and web-app domain are parsed from PA_DEPLOY_URL, so
+        # the only extra secret needed is PA_API_TOKEN.
+        env:
+          PA_DEPLOY_URL: ${{ secrets.PA_DEPLOY_URL }}
+          PA_API_TOKEN: ${{ secrets.PA_API_TOKEN }}
+        run: |
+          if [ -z "$PA_DEPLOY_URL" ]; then
+            exit 0  # secrets not configured; the deploy step already warned
+          fi
+          if [ -z "$PA_API_TOKEN" ]; then
+            echo "::warning::PA_API_TOKEN not set — cannot reload the PA worker via API, so new code will not go live until the worker restarts on its own. Add a PA_API_TOKEN repo secret (PA account page -> API token)."
+            exit 0
+          fi
+          # https://user.pythonanywhere.com/api/deploy -> host + username
+          base="${PA_DEPLOY_URL%/}"; base="${base%/api/deploy}"
+          host="${base#*://}"; host="${host%%/*}"
+          user="${host%%.*}"
+          echo "Reloading web app '$host' (user '$user') via PA API ..."
+          code="$(curl -sS -o /tmp/pa_reload.out -w '%{http_code}' -X POST \
+            --max-time 60 --retry 2 --retry-delay 5 --retry-all-errors \
+            -H "Authorization: Token $PA_API_TOKEN" \
+            "https://www.pythonanywhere.com/api/v0/user/$user/webapps/$host/reload/")"
+          echo "PA reload API returned HTTP $code"
+          cat /tmp/pa_reload.out 2>/dev/null || true; echo
+          case "$code" in
+            2*) echo "Reload requested." ;;
+            *) echo "::error::PA reload API returned HTTP $code — verify PA_API_TOKEN is valid for the account serving $host."; exit 1 ;;
+          esac
 
       - name: Verify the new code is live
         env:
