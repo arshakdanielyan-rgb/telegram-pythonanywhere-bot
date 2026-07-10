@@ -113,6 +113,16 @@ WRESTLER_IMAGES = os.environ.get("WRESTLER_IMAGES", "1").strip().lower() in (
     "on",
 )
 
+# AI image generation (optional). When IMAGE_API_KEY is set, the /image
+# command is registered. It uses Google's Gemini image API — the free tier
+# gives a daily image quota, and a key is free to create at
+# https://aistudio.google.com/apikey. The endpoint host is under
+# .googleapis.com, which is on PythonAnywhere's outbound whitelist. Leave
+# unset to disable the command. IMAGE_MODEL can point at a newer model as
+# long as it supports the models:generateContent endpoint (see bot/imagegen.py).
+IMAGE_API_KEY = os.environ.get("IMAGE_API_KEY", "").strip()
+IMAGE_MODEL = os.environ.get("IMAGE_MODEL", "gemini-2.5-flash-image").strip()
+
 # Auto-deploy webhook secret. When set, /api/deploy accepts requests
 # that present this value in the X-Deploy-Secret header and runs
 # `git pull` + WSGI reload. When unset, /api/deploy returns 403 — the
